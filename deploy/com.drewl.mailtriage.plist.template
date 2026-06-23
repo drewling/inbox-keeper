@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.drewl.mailtriage</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__MAIL_TRIAGE_DIR__/run.sh</string>
+    </array>
+
+    <!-- Daily at 07:00 local time -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>7</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>__MAIL_TRIAGE_DIR__/logs/launchd-triage.log</string>
+    <key>StandardErrorPath</key>
+    <string>__MAIL_TRIAGE_DIR__/logs/launchd-triage.log</string>
+
+    <!-- run.sh sets PATH internally; a minimal seed lets the shell start. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>__HOME__</string>
+        <key>MAIL_TRIAGE_DIR</key>
+        <string>__MAIL_TRIAGE_DIR__</string>
+    </dict>
+</dict>
+</plist>

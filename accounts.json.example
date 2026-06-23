@@ -1,0 +1,5 @@
+[
+  { "slug": "primary",   "email": "you@example.com",          "config_dir": "/Users/you/.config/gws" },
+  { "slug": "personal",  "email": "you.personal@gmail.com",   "config_dir": "/Users/you/.config/gws/accounts/personal" },
+  { "slug": "work",      "email": "you.work@gmail.com",        "config_dir": "/Users/you/.config/gws/accounts/work" }
+]

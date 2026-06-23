@@ -1,0 +1,34 @@
+# Secrets & tokens — never commit
+slack_app/config.env
+
+# Python virtual environment
+slack_app/venv/
+
+# Runtime state (generated files)
+drafts/queue.json
+drafts/briefing.json
+drafts/missed_today.json
+slack_app/snoozes.json
+
+# Logs
+logs/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# OS / editor
+.DS_Store
+*.bak
+*.bak.*
+
+# Sensitive credential backups
+client_secret.json.bak
+
+# Your real accounts (use accounts.json.example as a template)
+accounts.json
+
+# Lock files
+*.lock
+drafts/*.lock
