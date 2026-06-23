@@ -31,3 +31,26 @@ MAIL_TRIAGE_ACCOUNTS="$MAIL_TRIAGE_DIR/accounts.json"
 
 export MAIL_TRIAGE_LIB MAIL_TRIAGE_SLACK_APP MAIL_TRIAGE_DRAFTS
 export MAIL_TRIAGE_LOGS MAIL_TRIAGE_KNOWLEDGE MAIL_TRIAGE_QUEUE MAIL_TRIAGE_ACCOUNTS
+
+# --- PATH for CLI tools (gws, claude, node, python3) ---
+# launchd starts daemons with a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin), so the
+# always-on Slack daemon and its subprocesses can't find gws/claude without this.
+# Prepend common install locations that exist on this machine.
+_mt_prepend() {
+  case ":$PATH:" in
+    *":$1:"*) ;;                       # already present
+    *) [ -d "$1" ] && PATH="$1:$PATH" ;;
+  esac
+}
+_mt_prepend "/opt/homebrew/bin"
+_mt_prepend "/opt/homebrew/anaconda3/bin"
+_mt_prepend "/usr/local/bin"
+_mt_prepend "$HOME/.local/bin"          # claude
+# nvm-managed node/gws: add every installed node bin dir (newest wins via prepend order)
+if [ -d "$HOME/.nvm/versions/node" ]; then
+  for _d in "$HOME"/.nvm/versions/node/*/bin; do
+    [ -d "$_d" ] && _mt_prepend "$_d"
+  done
+fi
+unset _d
+export PATH
