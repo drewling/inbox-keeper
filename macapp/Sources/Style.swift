@@ -1,7 +1,8 @@
-// Style.swift — the brand's warm-paper palette (ported from the panel's OKLCH
-// tokens to sRGB) and a few reusable SwiftUI pieces. Light theme only; the surface
-// underneath is real Liquid Glass (NSGlassEffectView), so content here is opaque
-// ink on translucent warm surfaces — never glass-on-glass.
+// Style.swift — the brand palette + reusable pieces. Dark "Raycast" theme: the
+// panel base is masked dark vibrancy; on top of it, control-layer elements (cards,
+// segmented control, action bar, composer) get a glassy treatment — a translucent
+// frosted fill plus a bright top sheen — so the whole panel reads as layered glass
+// without the harsh full-panel rim of NSGlassEffectView.
 
 import SwiftUI
 
@@ -17,24 +18,41 @@ extension Color {
     }
 }
 
-// Dark "Raycast" theme. The surface is dark translucent glass; text is bright warm
-// off-white; terracotta stays the single accent. `raised` is a near-white meant to
-// be used at LOW alpha as a lifting overlay; `sunken` is near-black for recessed
-// insets; `paper` is a solid charcoal for opaque surfaces (composer, toast).
+// Dark "Raycast" theme, warmed toward the brand hue (the charcoal is tinted, not
+// neutral gray). `raised` is a near-white used at LOW alpha as a lifting overlay;
+// `sunken` is near-black for recessed insets; `paper` is the warm charcoal for
+// opaque surfaces (composer, toast).
 enum Paper {
-    static let paper       = Color(0.135, 0.128, 0.122)   // solid dark surface
-    static let raised      = Color(0.97, 0.96, 0.94)      // light overlay (use at low alpha)
-    static let sunken      = Color(0.0, 0.0, 0.0)         // dark inset (use at low alpha)
-    static let ink         = Color(0.95, 0.94, 0.92)      // primary text
-    static let ink2        = Color(0.78, 0.76, 0.73)
-    static let ink3        = Color(0.60, 0.585, 0.55)
-    static let ink4        = Color(0.47, 0.455, 0.43)
-    static let hairline    = Color(1.0, 1.0, 1.0)         // dividers (use at low alpha)
-    static let accent      = Color(0.87, 0.52, 0.40)      // terracotta, brightened for dark
-    static let accentPress = Color(0.79, 0.45, 0.34)
-    static let accentSoft  = Color(0.90, 0.62, 0.50)      // accent text on dark (toast undo)
-    static let clear       = Color(0.46, 0.78, 0.58)      // reward green
-    static let danger      = Color(0.91, 0.46, 0.43)
+    static let paper       = Color(0.128, 0.118, 0.108)   // warm charcoal surface
+    static let raised      = Color(0.99, 0.965, 0.93)     // warm light overlay (low alpha)
+    static let sunken      = Color(0.0, 0.0, 0.0)         // dark inset (low alpha)
+    static let ink         = Color(0.965, 0.95, 0.925)    // primary text (warm white)
+    static let ink2        = Color(0.80, 0.775, 0.73)
+    static let ink3        = Color(0.625, 0.60, 0.555)
+    static let ink4        = Color(0.49, 0.465, 0.43)
+    static let hairline    = Color(1.0, 0.98, 0.95)       // dividers / sheen (low alpha)
+    static let accent      = Color(0.90, 0.53, 0.39)      // terracotta
+    static let accentHi    = Color(0.94, 0.61, 0.47)      // lit top of the CTA gradient
+    static let accentPress = Color(0.80, 0.45, 0.33)
+    static let accentSoft  = Color(0.93, 0.65, 0.52)      // accent text on dark (toast undo)
+    static let clear       = Color(0.47, 0.79, 0.59)      // reward green
+    static let danger      = Color(0.92, 0.47, 0.44)
+}
+
+// Glassy control-layer surface: a translucent frosted fill plus a top-bright hairline
+// that reads as a glass sheen. The single building block for "more liquid glass" on
+// cards, the segmented track, the action bar, and the composer.
+extension View {
+    func glassSurface(_ radius: CGFloat, fill: Double = 0.06, sheen: Double = 0.18) -> some View {
+        self
+            .background(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(Paper.raised.opacity(fill)))
+            .overlay(
+                RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(
+                    LinearGradient(colors: [Paper.hairline.opacity(sheen), Paper.hairline.opacity(0.03)],
+                                   startPoint: .top, endPoint: .bottom),
+                    lineWidth: 0.75)
+            )
+    }
 }
 
 // Compact relative time: "now", "5m", "3h", "2d", "1w", "2mo".
@@ -49,37 +67,39 @@ func relTime(_ epoch: Int) -> String {
     return "\(d / 30)mo"
 }
 
-// The single tinted call-to-action. Solid terracotta (not glass) so it reads as
-// the one primary action over the glass surface, per Apple's "tint = one thing".
+// The single tinted call-to-action: a glossy terracotta pill (vertical gradient +
+// a bright top highlight) so it reads as liquid, the one accented control.
 struct PrimaryButtonStyle: ButtonStyle {
     var enabled: Bool = true
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(.white)
-            .padding(.horizontal, 15).frame(height: 34)
+            .padding(.horizontal, 16).frame(height: 34)
             .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(configuration.isPressed ? Paper.accentPress : Paper.accent)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(LinearGradient(
+                        colors: configuration.isPressed ? [Paper.accentPress, Paper.accentPress]
+                                                         : [Paper.accentHi, Paper.accent],
+                        startPoint: .top, endPoint: .bottom))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(LinearGradient(colors: [.white.opacity(0.35), .white.opacity(0.0)],
+                                                     startPoint: .top, endPoint: .bottom), lineWidth: 0.75))
+                    .shadow(color: Paper.accent.opacity(configuration.isPressed ? 0 : 0.35), radius: 8, y: 2)
             )
-            .opacity(enabled ? 1 : 0.55)
+            .opacity(enabled ? 1 : 0.5)
             .contentShape(Rectangle())
     }
 }
 
-// Quiet secondary action: hairline-bordered warm chip.
+// Quiet secondary action: a glassy frosted chip.
 struct GhostButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 12.5, weight: .medium))
             .foregroundStyle(Paper.ink2)
             .padding(.horizontal, 13).frame(height: 30)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Paper.raised.opacity(configuration.isPressed ? 0.16 : 0.08))
-                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(Paper.hairline.opacity(0.14), lineWidth: 0.5))
-            )
+            .glassSurface(8, fill: configuration.isPressed ? 0.14 : 0.07)
             .contentShape(Rectangle())
     }
 }

@@ -31,6 +31,12 @@ struct PanelView: View {
             }
         }
         .frame(width: PANEL_W, height: PANEL_H)
+        .background(
+            // Warm depth over the vibrancy: a little darker/richer toward the bottom.
+            LinearGradient(colors: [Color(0.15, 0.135, 0.12).opacity(0.32),
+                                    Color(0.10, 0.09, 0.08).opacity(0.46)],
+                           startPoint: .top, endPoint: .bottom)
+        )
         .foregroundStyle(Paper.ink)
         .tint(Paper.accent)
         .environment(\.colorScheme, .dark)
@@ -45,14 +51,16 @@ private struct TopBar: View {
     @EnvironmentObject var m: KeeperModel
     var body: some View {
         HStack(spacing: 8) {
-            // Wordmark: accent glyph + "inbox·keeper".
-            RoundedRectangle(cornerRadius: 4.5, style: .continuous)
-                .fill(Paper.accent)
-                .frame(width: 14, height: 14)
-                .overlay(alignment: .bottom) {
-                    Capsule().fill(Color(0.99, 0.97, 0.94, 0.92))
-                        .frame(width: 8, height: 1.7).padding(.bottom, 4)
-                }
+            // Wordmark: a glossy terracotta squircle with a cream check (echoes the
+            // app icon) + "inbox·keeper".
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(LinearGradient(colors: [Paper.accentHi, Paper.accent], startPoint: .top, endPoint: .bottom))
+                .frame(width: 16, height: 16)
+                .overlay(Image(systemName: "checkmark")
+                    .font(.system(size: 8.5, weight: .bold)).foregroundStyle(Color(0.99, 0.975, 0.94)))
+                .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .strokeBorder(.white.opacity(0.28), lineWidth: 0.5))
+                .shadow(color: Paper.accent.opacity(0.4), radius: 3, y: 1)
             HStack(spacing: 0) {
                 Text("inbox").fontWeight(.semibold)
                 Text("·").foregroundStyle(Paper.ink4)
@@ -118,8 +126,11 @@ private struct SegmentedNav: View {
                         .background {
                             if on {
                                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .fill(Paper.raised.opacity(0.13))
-                                    .shadow(color: .black.opacity(0.06), radius: 1.5, y: 1)
+                                    .fill(Paper.raised.opacity(0.16))
+                                    .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .strokeBorder(LinearGradient(colors: [Paper.hairline.opacity(0.28), Paper.hairline.opacity(0.05)],
+                                                                     startPoint: .top, endPoint: .bottom), lineWidth: 0.75))
+                                    .shadow(color: .black.opacity(0.18), radius: 3, y: 1)
                                     .matchedGeometryEffect(id: "seg", in: ns)
                             }
                         }
@@ -129,8 +140,9 @@ private struct SegmentedNav: View {
             }
         }
         .padding(3)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Paper.sunken.opacity(0.24)))
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Paper.sunken.opacity(0.22)))
         .padding(.horizontal, 14).padding(.vertical, 10)
+        .focusEffectDisabled()         // no blue focus ring on the first-load selected tab
     }
 }
 
@@ -301,8 +313,7 @@ private struct AccountCard: View {
             }
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Paper.raised.opacity(0.06))
-            .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Paper.hairline.opacity(0.1), lineWidth: 0.5)))
+        .glassSurface(12)
     }
     private var statLine: String {
         guard account.ok else { return "Couldn’t reach this account" }
@@ -356,8 +367,7 @@ private struct UndoRow: View {
                 .buttonStyle(GhostButtonStyle()).disabled(m.isBusy)
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Paper.raised.opacity(0.06))
-            .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Paper.hairline.opacity(0.1), lineWidth: 0.5)))
+        .glassSurface(12)
     }
 }
 
@@ -483,7 +493,10 @@ private struct ComposerView: View {
             }
             .background(Paper.paper.opacity(0.94))
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .shadow(color: .black.opacity(0.18), radius: 22, y: 8)
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(LinearGradient(colors: [Paper.hairline.opacity(0.2), Paper.hairline.opacity(0.04)],
+                                             startPoint: .top, endPoint: .bottom), lineWidth: 0.75))
+            .shadow(color: .black.opacity(0.32), radius: 24, y: 10)
             .padding(10)
         }
     }
