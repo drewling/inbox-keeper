@@ -19,9 +19,6 @@ let ARROW_H: CGFloat = 10       // how far the arrow tip protrudes above the bod
 let ARROW_CLAMP: CGFloat = 32   // keep the arrow off the rounded top corners
 let GAP: CGFloat = 5            // arrow tip to the menu bar
 
-// Charcoal tint that turns the regular glass into a dark "Raycast" surface.
-let GLASS_TINT = NSColor(srgbRed: 0.12, green: 0.112, blue: 0.106, alpha: 0.55)
-
 func resolveRepoRoot() -> String? {
     let fm = FileManager.default
     if let env = ProcessInfo.processInfo.environment["MAIL_TRIAGE_DIR"],
@@ -55,12 +52,72 @@ final class KeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
+/// Dark frosted surface for the panel — classic vibrancy (what Raycast-style panels
+/// use), masked to a rounded body + upward arrow. Unlike NSGlassEffectView this has
+/// no bright specular rim, so there's no hairline outline around the window.
+final class GlassSurface: NSView {
+    let effect = NSVisualEffectView()
+    var arrowX: CGFloat = PANEL_W - 40 { didSet { if oldValue != arrowX { applyMask() } } }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        effect.material = .hudWindow            // dark, translucent
+        effect.blendingMode = .behindWindow
+        effect.state = .active
+        effect.appearance = NSAppearance(named: .darkAqua)
+        effect.frame = bounds
+        effect.autoresizingMask = [.width, .height]
+        addSubview(effect)
+        applyMask()
+    }
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    private func bubblePath() -> NSBezierPath {
+        let body = NSRect(x: 0, y: 0, width: bounds.width, height: PANEL_H)
+        let path = NSBezierPath(roundedRect: body, xRadius: CORNER, yRadius: CORNER)
+        let cx = max(ARROW_CLAMP, min(arrowX, bounds.width - ARROW_CLAMP))
+        let tri = NSBezierPath()
+        tri.move(to: NSPoint(x: cx - ARROW_W / 2, y: PANEL_H - 1))
+        tri.line(to: NSPoint(x: cx, y: PANEL_H + ARROW_H))
+        tri.line(to: NSPoint(x: cx + ARROW_W / 2, y: PANEL_H - 1))
+        tri.close()
+        path.append(tri)
+        return path
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        applyMask()
+    }
+
+    // Rasterize the bubble+arrow at the display's backing scale so the mask edge
+    // stays crisp on Retina.
+    private func applyMask() {
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        let scale = window?.backingScaleFactor ?? 2
+        let pw = Int((bounds.width * scale).rounded()), ph = Int((bounds.height * scale).rounded())
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pw, pixelsHigh: ph,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return }
+        rep.size = bounds.size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSColor.black.setFill()
+        bubblePath().fill()
+        NSGraphicsContext.restoreGraphicsState()
+        let img = NSImage(size: bounds.size)
+        img.addRepresentation(rep)
+        effect.maskImage = img
+    }
+}
+
 @MainActor
 final class AppController: NSObject, NSApplicationDelegate {
     let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     let model = KeeperModel(port: PORT)
     var panel: KeyablePanel!
-    var arrowLayer: CAShapeLayer?
+    var glassSurface: GlassSurface?
     var server: Process?
     var repoMissing = false
     var clickMonitor: Any?
@@ -102,56 +159,30 @@ final class AppController: NSObject, NSApplicationDelegate {
         setupPanel()
     }
 
-    /// Build the dark Liquid Glass surface hosting the SwiftUI panel. The body is a
-    /// rounded-rect glass; the arrow is a crisp CAShapeLayer triangle drawn behind the
-    /// body, filled to match the dark glass. (NSGlassEffectView can't be masked or
-    /// rotated into an arrow — masks are ignored and frameCenterRotation traps in
-    /// layout — so the pointer is a matched solid triangle, which also stays clean.)
+    /// Build the dark frosted surface (masked vibrancy, body + arrow) hosting the
+    /// SwiftUI panel. The vibrancy is the surface; the SwiftUI content sits on top
+    /// clipped to the rounded body.
     func makeGlassContent() -> NSView {
         let dark = NSAppearance(named: .darkAqua)
         let total = NSRect(x: 0, y: 0, width: PANEL_W, height: PANEL_H + ARROW_H)
         let bodyRect = NSRect(x: 0, y: 0, width: PANEL_W, height: PANEL_H)
+
+        let surface = GlassSurface(frame: total)
+        glassSurface = surface
 
         let hosting = NSHostingView(rootView: PanelView().environmentObject(model))
         hosting.frame = bodyRect
         hosting.wantsLayer = true
         hosting.layer?.backgroundColor = .clear
         hosting.layer?.cornerRadius = CORNER
-        hosting.layer?.cornerCurve = .continuous      // match the glass's continuous corners
+        hosting.layer?.cornerCurve = .continuous
         hosting.layer?.masksToBounds = true
         hosting.appearance = dark
-
-        let body = NSGlassEffectView(frame: bodyRect)
-        body.cornerRadius = CORNER
-        body.tintColor = GLASS_TINT
-        body.contentView = hosting
-        body.appearance = dark
-
-        let arrow = CAShapeLayer()
-        arrow.fillColor = NSColor(srgbRed: 0.145, green: 0.137, blue: 0.130, alpha: 0.97).cgColor
-        arrowLayer = arrow
-
-        let wrap = NSView(frame: total)
-        wrap.wantsLayer = true
-        wrap.layer?.addSublayer(arrow)                // behind the body's subview layer
-        wrap.addSubview(body)
-        setArrowX(PANEL_W - 40)
-        return wrap
+        surface.addSubview(hosting)                   // content on top of the vibrancy
+        return surface
     }
 
-    /// Point the arrow at the menu-bar item: a triangle on the body's top edge,
-    /// clamped off the rounded corners. Layer space is y-up, so the body top is at
-    /// PANEL_H and the tip is ARROW_H above it.
-    func setArrowX(_ x: CGFloat) {
-        guard let arrow = arrowLayer else { return }
-        let cx = max(ARROW_CLAMP, min(x, PANEL_W - ARROW_CLAMP))
-        let path = CGMutablePath()
-        path.move(to: CGPoint(x: cx - ARROW_W / 2, y: PANEL_H - 2))   // base tucks under the body edge
-        path.addLine(to: CGPoint(x: cx, y: PANEL_H + ARROW_H))
-        path.addLine(to: CGPoint(x: cx + ARROW_W / 2, y: PANEL_H - 2))
-        path.closeSubpath()
-        arrow.path = path
-    }
+    func setArrowX(_ x: CGFloat) { glassSurface?.arrowX = x }
 
     func setupStatusItem() {
         if let button = statusItem.button {
