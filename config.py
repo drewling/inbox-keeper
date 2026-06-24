@@ -45,11 +45,12 @@ KNOWLEDGE_DIR = os.path.join(ROOT, "knowledge")
 # ---------------------------------------------------------------------------
 
 ACCOUNTS_FILE  = os.path.join(ROOT, "accounts.json")
+CATEGORIES_PATH = os.path.join(ROOT, "categories.json")
 QUEUE_PATH     = os.environ.get("QUEUE_PATH", os.path.join(DRAFTS_DIR, "queue.json"))
 BRIEFING_PATH  = os.environ.get("BRIEFING_PATH", os.path.join(DRAFTS_DIR, "briefing.json"))
 MISSED_PATH    = os.path.join(DRAFTS_DIR, "missed_today.json")
 SNOOZES_PATH   = os.path.join(SLACK_APP_DIR, "snoozes.json")
-PROFILE_PATH   = os.path.join(KNOWLEDGE_DIR, "drewl.md")
+PROFILE_PATH   = os.path.join(KNOWLEDGE_DIR, os.environ.get("PROFILE_FILE", "profile.md"))
 
 # ---------------------------------------------------------------------------
 # Python binary

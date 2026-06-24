@@ -14,9 +14,9 @@ let PORT = ProcessInfo.processInfo.environment["KEEPER_PORT"] ?? "8765"
 let PANEL_W: CGFloat = 420
 let PANEL_H: CGFloat = 640
 let CORNER: CGFloat = 17        // menu-surface corner radius
-let ARROW_W: CGFloat = 26       // arrow base width
-let ARROW_H: CGFloat = 10       // how far the arrow tip protrudes above the body
-let ARROW_CLAMP: CGFloat = 32   // keep the arrow off the rounded top corners
+let ARROW_W: CGFloat = 30       // arrow base width (wider reads as a gentler curve)
+let ARROW_H: CGFloat = 11       // how far the arrow tip protrudes above the body
+let ARROW_CLAMP: CGFloat = 34   // keep the arrow off the rounded top corners
 let GAP: CGFloat = 5            // arrow tip to the menu bar
 
 func resolveRepoRoot() -> String? {
@@ -33,7 +33,52 @@ func resolveRepoRoot() -> String? {
         }
         dir = dir.deletingLastPathComponent()
     }
-    return nil
+    // Packaged .app: seed the bundled runtime into a writable support dir and use it.
+    return seedFromBundle()
+}
+
+/// Application Support location the packaged app runs from. The code lives in the
+/// bundle (read-only, replaced on update); the running copy + all user data live
+/// here so updates never clobber accounts, policy, learning, or state.
+func supportDirURL() -> URL {
+    FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/inbox-keeper", isDirectory: true)
+}
+
+/// Copy the bundled `Contents/Resources/payload` into the support dir. Pure code is
+/// refreshed every launch (so updates apply); user-editable files are seeded only
+/// when missing; user data (accounts, learning, drafts, logs, state) is never touched.
+private func seedFromBundle() -> String? {
+    let fm = FileManager.default
+    guard let res = Bundle.main.resourceURL else { return nil }
+    let payload = res.appendingPathComponent("payload", isDirectory: true)
+    guard fm.fileExists(atPath: payload.appendingPathComponent("lib/keeper_server.py").path) else { return nil }
+    let support = supportDirURL()
+    try? fm.createDirectory(at: support, withIntermediateDirectories: true)
+
+    func overwrite(_ rel: String) {
+        let src = payload.appendingPathComponent(rel), dst = support.appendingPathComponent(rel)
+        guard fm.fileExists(atPath: src.path) else { return }
+        try? fm.createDirectory(at: dst.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? fm.removeItem(at: dst)
+        try? fm.copyItem(at: src, to: dst)
+    }
+    func seedIfMissing(_ rel: String) {
+        let dst = support.appendingPathComponent(rel)
+        guard !fm.fileExists(atPath: dst.path) else { return }
+        let src = payload.appendingPathComponent(rel)
+        guard fm.fileExists(atPath: src.path) else { return }
+        try? fm.copyItem(at: src, to: dst)
+    }
+    // Code + templates — safe to refresh (never user data). app/panel only, so a
+    // generated app/state.json beside it survives. knowledge: only the template.
+    ["lib", "bin", "app/panel", "config.py", "config.sh", "TRIAGE.md",
+     "accounts.json.example", "knowledge/profile.example.md"].forEach(overwrite)
+    // User-editable — seed once, then leave their edits alone.
+    ["keep-policy.md", "categories.json"].forEach(seedIfMissing)
+
+    return fm.fileExists(atPath: support.appendingPathComponent("lib/keeper_server.py").path)
+        ? support.path : nil
 }
 
 func augmentedPath() -> String {
@@ -77,12 +122,21 @@ final class GlassSurface: NSView {
         let body = NSRect(x: 0, y: 0, width: bounds.width, height: PANEL_H)
         let path = NSBezierPath(roundedRect: body, xRadius: CORNER, yRadius: CORNER)
         let cx = max(ARROW_CLAMP, min(arrowX, bounds.width - ARROW_CLAMP))
-        let tri = NSBezierPath()
-        tri.move(to: NSPoint(x: cx - ARROW_W / 2, y: PANEL_H - 1))
-        tri.line(to: NSPoint(x: cx, y: PANEL_H + ARROW_H))
-        tri.line(to: NSPoint(x: cx + ARROW_W / 2, y: PANEL_H - 1))
-        tri.close()
-        path.append(tri)
+        // A smooth "beak", not a triangle: each flank leaves the flat top edge
+        // horizontally (so it blends in with no visible kink) and curves up and over a
+        // softly rounded tip. The near-tip control points sit just off-centre at full
+        // height, which rounds the apex instead of meeting in a sharp point.
+        let w = ARROW_W / 2, h = ARROW_H, y0 = PANEL_H - 1
+        let beak = NSBezierPath()
+        beak.move(to: NSPoint(x: cx - w, y: y0))
+        beak.curve(to: NSPoint(x: cx, y: y0 + h),
+                   controlPoint1: NSPoint(x: cx - w * 0.55, y: y0),
+                   controlPoint2: NSPoint(x: cx - 2.1, y: y0 + h))
+        beak.curve(to: NSPoint(x: cx + w, y: y0),
+                   controlPoint1: NSPoint(x: cx + 2.1, y: y0 + h),
+                   controlPoint2: NSPoint(x: cx + w * 0.55, y: y0))
+        beak.close()
+        path.append(beak)
         return path
     }
 

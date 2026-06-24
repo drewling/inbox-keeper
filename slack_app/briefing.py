@@ -11,7 +11,7 @@ briefing.json schema
   "generated_at": "<ISO-8601 UTC>",          # when run.sh wrote this file
   "accounts": [
     {
-      "label": "tayo@drewl.com",             # human-readable label
+      "label": "you@example.com",            # human-readable label
       "inbox_count": 12,                     # total inbox messages (optional)
       "action_count": 3,                     # ⚡ Action label count (optional)
       "missed_count": 2                      # missed items surfaced this run (optional)

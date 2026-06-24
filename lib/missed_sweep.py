@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Parallel missed-items sweep across all authenticated accounts, then email one
-"⏰ You may have missed" digest to tayo@drewl.com.
+"⏰ You may have missed" digest to the primary account (the first in accounts.json).
 
 Runs lib/catchup.py for each authenticated account concurrently (each does its own
 Haiku filtering), aggregates the important missed items, and sends a single digest.

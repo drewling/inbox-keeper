@@ -5,53 +5,63 @@
 // without the harsh full-panel rim of NSGlassEffectView.
 
 import SwiftUI
+import AppKit
 
 extension Color {
     init(_ r: Double, _ g: Double, _ b: Double, _ a: Double = 1) {
         self.init(.sRGB, red: r, green: g, blue: b, opacity: a)
     }
-    /// Parse "#RRGGBB" (the per-account color the server hands us).
+    /// Parse "#RRGGBB" (the per-account / per-category color the server hands us).
     init(hex: String) {
         let s = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
         var v: UInt64 = 0; Scanner(string: s).scanHexInt64(&v)
         self.init(Double((v >> 16) & 0xff) / 255, Double((v >> 8) & 0xff) / 255, Double(v & 0xff) / 255)
     }
+    /// "#RRGGBB" for round-tripping a ColorPicker selection back to the server.
+    func hexString() -> String {
+        let ns = NSColor(self).usingColorSpace(.sRGB) ?? NSColor(self)
+        let r = Int((ns.redComponent * 255).rounded())
+        let g = Int((ns.greenComponent * 255).rounded())
+        let b = Int((ns.blueComponent * 255).rounded())
+        return String(format: "#%02X%02X%02X", r, g, b)
+    }
 }
 
-// Dark "Raycast" theme, warmed toward the brand hue (the charcoal is tinted, not
-// neutral gray). `raised` is a near-white used at LOW alpha as a lifting overlay;
-// `sunken` is near-black for recessed insets; `paper` is the warm charcoal for
-// opaque surfaces (composer, toast).
+// Dark "Raycast" theme. The base is a deep, near-neutral graphite (only a whisper
+// of warmth so it relates to the terracotta mark without going muddy-brown), so the
+// glass reads clean and the one accent really pops. `raised` is a near-white used at
+// LOW alpha as a lifting overlay; `sunken` is black for recessed insets; `paper` is
+// the opaque graphite for the composer + toast; the sheen white is faintly COOL, the
+// way real glass catches light.
 enum Paper {
-    static let paper       = Color(0.128, 0.118, 0.108)   // warm charcoal surface
-    static let raised      = Color(0.99, 0.965, 0.93)     // warm light overlay (low alpha)
+    static let paper       = Color(0.10, 0.098, 0.094)    // deep graphite surface
+    static let raised      = Color(0.97, 0.965, 0.96)     // light overlay (low alpha)
     static let sunken      = Color(0.0, 0.0, 0.0)         // dark inset (low alpha)
-    static let ink         = Color(0.965, 0.95, 0.925)    // primary text (warm white)
-    static let ink2        = Color(0.80, 0.775, 0.73)
-    static let ink3        = Color(0.625, 0.60, 0.555)
-    static let ink4        = Color(0.49, 0.465, 0.43)
-    static let hairline    = Color(1.0, 0.98, 0.95)       // dividers / sheen (low alpha)
-    static let accent      = Color(0.90, 0.53, 0.39)      // terracotta
-    static let accentHi    = Color(0.94, 0.61, 0.47)      // lit top of the CTA gradient
-    static let accentPress = Color(0.80, 0.45, 0.33)
-    static let accentSoft  = Color(0.93, 0.65, 0.52)      // accent text on dark (toast undo)
-    static let clear       = Color(0.47, 0.79, 0.59)      // reward green
-    static let danger      = Color(0.92, 0.47, 0.44)
+    static let ink         = Color(0.97, 0.965, 0.96)     // primary text
+    static let ink2        = Color(0.85, 0.845, 0.835)    // secondary — kept bright for glass
+    static let ink3        = Color(0.71, 0.705, 0.695)
+    static let ink4        = Color(0.56, 0.555, 0.545)
+    static let hairline    = Color(0.97, 0.98, 1.0)       // dividers / glass sheen — faintly cool
+    static let accent      = Color(0.102, 0.451, 0.910)   // Google blue (#1A73E8)
+    static let accentHi    = Color(0.259, 0.522, 0.957)   // lit top of the CTA gradient (#4285F4)
+    static let accentPress = Color(0.082, 0.341, 0.690)   // pressed
+    static let accentSoft  = Color(0.541, 0.706, 0.973)   // blue text on dark (#8AB4F8, toast undo)
+    static let clear       = Color(0.45, 0.81, 0.62)      // reward green (Google green family)
+    static let danger      = Color(0.94, 0.40, 0.40)      // error red, kept distinct from the blue accent
 }
 
-// Glassy control-layer surface: a translucent frosted fill plus a top-bright hairline
-// that reads as a glass sheen. The single building block for "more liquid glass" on
-// cards, the segmented track, the action bar, and the composer.
+// Control-layer surface, rendered with the native macOS 26 Liquid Glass material
+// (.glassEffect) so cards, the composer, and buttons get the system's real glass
+// refraction + adaptive edge — not a hand-painted imitation. `interactive` turns on
+// the system's press/hover response (for buttons); `tint` optionally tints the glass.
 extension View {
-    func glassSurface(_ radius: CGFloat, fill: Double = 0.06, sheen: Double = 0.18) -> some View {
-        self
-            .background(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(Paper.raised.opacity(fill)))
-            .overlay(
-                RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(
-                    LinearGradient(colors: [Paper.hairline.opacity(sheen), Paper.hairline.opacity(0.03)],
-                                   startPoint: .top, endPoint: .bottom),
-                    lineWidth: 0.75)
-            )
+    func glassSurface(_ radius: CGFloat, interactive: Bool = false, tint: Color? = nil) -> some View {
+        // A subtle dark tint by default: keeps the glass reading as glass while
+        // guaranteeing a dark-enough backing so text stays legible even when
+        // something bright sits behind the panel.
+        var glass: Glass = .regular.tint(tint ?? Color(0, 0, 0).opacity(0.26))
+        if interactive { glass = glass.interactive() }
+        return self.glassEffect(glass, in: .rect(cornerRadius: radius))
     }
 }
 
@@ -92,28 +102,63 @@ struct PrimaryButtonStyle: ButtonStyle {
     }
 }
 
-// Quiet secondary action: a glassy frosted chip.
+// Quiet secondary action: an interactive Liquid Glass chip (the system handles the
+// press/hover response).
 struct GhostButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 12.5, weight: .medium))
             .foregroundStyle(Paper.ink2)
             .padding(.horizontal, 13).frame(height: 30)
-            .glassSurface(8, fill: configuration.isPressed ? 0.14 : 0.07)
+            .glassSurface(8, interactive: true)
             .contentShape(Rectangle())
     }
 }
 
-// Small initials chip (account color), used in rows + cards + the top strip.
-struct InitialsChip: View {
+// The one account mark, used in rows, cards, and the top strip: a circular avatar
+// showing the real Gmail profile photo when we have one, falling back to a coloured
+// initials circle while it loads or if the account has no photo.
+struct Avatar: View {
     let text: String
     let color: Color
+    var photoURL: String? = nil
     var size: CGFloat = 26
     var body: some View {
+        ZStack {
+            initials                                   // always behind, so it shows while loading
+            if let s = photoURL, let url = URL(string: s) {
+                AsyncImage(url: url) { phase in
+                    if case .success(let img) = phase {
+                        img.resizable().scaledToFill().transition(.opacity)
+                    }
+                }
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .overlay(Circle().strokeBorder(.white.opacity(0.14), lineWidth: 0.5))
+    }
+    private var initials: some View {
         Text(text)
-            .font(.system(size: size * 0.38, weight: .bold))
+            .font(.system(size: size * 0.4, weight: .bold))
             .foregroundStyle(.white)
             .frame(width: size, height: size)
-            .background(RoundedRectangle(cornerRadius: size * 0.27, style: .continuous).fill(color))
+            .background(Circle().fill(color))
+    }
+}
+
+// A small coloured tag marking which category the keeper sorted an open loop into.
+struct CategoryTag: View {
+    let category: Category
+    var body: some View {
+        HStack(spacing: 3) {
+            Text(category.emoji).font(.system(size: 8.5))
+            Text(category.name).font(.system(size: 10, weight: .semibold)).lineLimit(1)
+        }
+        .foregroundStyle(Color(hex: category.color))
+        .padding(.horizontal, 6).padding(.vertical, 2.5)
+        .background(Capsule().fill(Color(hex: category.color).opacity(0.16)))
+        .overlay(Capsule().strokeBorder(Color(hex: category.color).opacity(0.30), lineWidth: 0.5))
+        .fixedSize()
     }
 }

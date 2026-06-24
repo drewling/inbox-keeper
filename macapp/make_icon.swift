@@ -1,7 +1,7 @@
 // make_icon.swift — draws the inbox-keeper app icon natively (no external image
 // generation) and emits a full .iconset. build.sh runs `iconutil` on the output.
 //
-// The mark echoes the in-app wordmark: a warm terracotta squircle holding a cream
+// The mark echoes the in-app wordmark: a glossy Google-blue squircle holding a cream
 // "checked tray" glyph — a tray (your inbox) with a checkmark resting in it
 // ("only what needs you, and nothing lost"). Deterministic + on-brand + in-repo.
 //
@@ -12,13 +12,13 @@ import AppKit
 let outDir = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "AppIcon.iconset"
 try? FileManager.default.createDirectory(atPath: outDir, withIntermediateDirectories: true)
 
-// Brand palette (sRGB approximations of the panel's OKLCH terracotta + cream).
+// Brand palette: a Google-blue squircle holding a white check.
 func srgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat = 1) -> NSColor {
     NSColor(srgbRed: r, green: g, blue: b, alpha: a)
 }
-let tileTop    = srgb(0.84, 0.47, 0.36)   // accent, lit
-let tileBottom = srgb(0.66, 0.33, 0.25)   // accent-press, shaded
-let cream      = srgb(0.985, 0.965, 0.930)
+let tileTop    = srgb(0.259, 0.522, 0.957)   // Google blue, lit (#4285F4)
+let tileBottom = srgb(0.090, 0.380, 0.760)   // Google blue, shaded
+let cream      = srgb(0.99, 0.99, 1.0)       // crisp white check
 
 // Draw the icon into a bitmap of `px` × `px` pixels.
 func render(_ px: Int) -> NSBitmapImageRep {
@@ -40,7 +40,7 @@ func render(_ px: Int) -> NSBitmapImageRep {
 
     ctx.saveGState()
     ctx.setShadow(offset: CGSize(width: 0, height: -S * 0.012),
-                  blur: S * 0.035, color: srgb(0.20, 0.10, 0.06, 0.30).cgColor)
+                  blur: S * 0.035, color: srgb(0.04, 0.10, 0.22, 0.32).cgColor)
     let tilePath = NSBezierPath(roundedRect: tile, xRadius: radius, yRadius: radius)
     cream.setFill(); tilePath.fill()   // fill once just to cast the shadow cleanly
     ctx.restoreGState()

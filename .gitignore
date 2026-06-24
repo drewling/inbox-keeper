@@ -29,6 +29,11 @@ client_secret.json.bak
 # Your real accounts (use accounts.json.example as a template)
 accounts.json
 
+# Your personal sender profile(s) that ground draft voice — never publish these.
+# Only the *.example.md template is tracked.
+knowledge/*.md
+!knowledge/*.example.md
+
 # Lock files
 *.lock
 drafts/*.lock

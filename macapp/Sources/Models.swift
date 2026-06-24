@@ -24,9 +24,10 @@ struct AppState: Decodable {
     var accounts: [Account] = []
     var policy = ""
     var learned = ""
+    var categories: [Category] = []
 
     enum K: String, CodingKey {
-        case generatedAt, ok, totalLoops, needsBuild, failedAccounts, accounts, policy, learned
+        case generatedAt, ok, totalLoops, needsBuild, failedAccounts, accounts, policy, learned, categories
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)
@@ -38,7 +39,48 @@ struct AppState: Decodable {
         accounts = try c.decodeIfPresent([Account].self, forKey: .accounts) ?? []
         policy = try c.decodeIfPresent(String.self, forKey: .policy) ?? ""
         learned = try c.decodeIfPresent(String.self, forKey: .learned) ?? ""
+        categories = try c.decodeIfPresent([Category].self, forKey: .categories) ?? []
     }
+
+    /// Look up a category by name (case-insensitive) so a loop's tag can pull its
+    /// colour + emoji from the authoritative list.
+    func category(named name: String?) -> Category? {
+        guard let name, !name.isEmpty else { return nil }
+        return categories.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+    }
+}
+
+// A user-defined bucket the keeper sorts open loops into. Editable in Settings,
+// passed to the classifier, and applied as a real Gmail label ("<emoji> <name>").
+struct Category: Decodable, Identifiable, Equatable {
+    var name = ""
+    var description = ""
+    var color = "#5C6BC0"
+    var emoji = "🏷️"
+    // Stable editor identity: the row keeps the same id while you retype its name,
+    // so the text field doesn't lose focus on every keystroke. Not part of the wire.
+    let uid = UUID()
+
+    var id: UUID { uid }
+
+    enum K: String, CodingKey { case name, description, color, emoji }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: K.self)
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
+        color = try c.decodeIfPresent(String.self, forKey: .color) ?? "#5C6BC0"
+        emoji = try c.decodeIfPresent(String.self, forKey: .emoji) ?? "🏷️"
+    }
+    init(name: String, description: String = "", color: String = "#5C6BC0", emoji: String = "🏷️") {
+        self.name = name; self.description = description; self.color = color; self.emoji = emoji
+    }
+
+    static func == (a: Category, b: Category) -> Bool {
+        a.name == b.name && a.description == b.description && a.color == b.color && a.emoji == b.emoji
+    }
+
+    /// The wire shape the server's PUT /api/categories expects.
+    var json: [String: Any] { ["name": name, "description": description, "color": color, "emoji": emoji] }
 }
 
 struct Account: Decodable, Identifiable {
@@ -46,6 +88,7 @@ struct Account: Decodable, Identifiable {
     var email = ""
     var short = ""
     var color = "#888888"
+    var photoURL: String?
     var ok = false
     var error: String?
     var inboxThreads = 0
@@ -59,7 +102,7 @@ struct Account: Decodable, Identifiable {
     var archivedCount: Int { undoPoints.reduce(0) { $0 + $1.count } }
 
     enum K: String, CodingKey {
-        case slug, email, short, color, ok, error, inboxThreads, unread, partial, loops, undoPoints
+        case slug, email, short, color, photoURL, ok, error, inboxThreads, unread, partial, loops, undoPoints
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)
@@ -67,6 +110,7 @@ struct Account: Decodable, Identifiable {
         email = try c.decodeIfPresent(String.self, forKey: .email) ?? ""
         short = try c.decodeIfPresent(String.self, forKey: .short) ?? ""
         color = try c.decodeIfPresent(String.self, forKey: .color) ?? "#888888"
+        photoURL = try c.decodeIfPresent(String.self, forKey: .photoURL)
         ok = try c.decodeIfPresent(Bool.self, forKey: .ok) ?? false
         error = try c.decodeIfPresent(String.self, forKey: .error)
         inboxThreads = try c.decodeIfPresent(Int.self, forKey: .inboxThreads) ?? 0
@@ -85,11 +129,12 @@ struct Loop: Decodable, Identifiable {
     var snippet: String?
     var epoch = 0
     var accountSlug: String?
+    var category: String?
 
     var id: String { threadId }
 
     enum K: String, CodingKey {
-        case threadId, sender, senderEmail, subject, snippet, epoch, accountSlug
+        case threadId, sender, senderEmail, subject, snippet, epoch, accountSlug, category
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)
@@ -100,12 +145,14 @@ struct Loop: Decodable, Identifiable {
         snippet = try c.decodeIfPresent(String.self, forKey: .snippet)
         epoch = try c.decodeIfPresent(Int.self, forKey: .epoch) ?? 0
         accountSlug = try c.decodeIfPresent(String.self, forKey: .accountSlug)
+        category = try c.decodeIfPresent(String.self, forKey: .category)
     }
     // Constructed locally for optimistic undo re-insertion.
     init(threadId: String, sender: String, senderEmail: String?, subject: String,
-         snippet: String?, epoch: Int, accountSlug: String?) {
+         snippet: String?, epoch: Int, accountSlug: String?, category: String? = nil) {
         self.threadId = threadId; self.sender = sender; self.senderEmail = senderEmail
         self.subject = subject; self.snippet = snippet; self.epoch = epoch; self.accountSlug = accountSlug
+        self.category = category
     }
 }
 
@@ -235,6 +282,23 @@ struct KeeperAPI {
 
     func savePolicy(_ policy: String) async throws {
         _ = try await sendJSON("/api/policy", method: "PUT", body: ["policy": policy])
+    }
+
+    /// The user's editable categories. Read separately from /api/state so the editor
+    /// always reflects the on-disk list even when state is mid-rebuild.
+    func categories() async throws -> [Category] {
+        struct Wrap: Decodable { var categories: [Category] = [] }
+        let w: Wrap = try await get("/api/categories")
+        return w.categories
+    }
+
+    func saveCategories(_ cats: [Category]) async throws {
+        _ = try await sendJSON("/api/categories", method: "PUT", body: ["categories": cats.map(\.json)])
+    }
+
+    /// Delete a learned preference and suppress it so it's never re-learned.
+    func rejectLearned(_ text: String) async throws {
+        _ = try await sendJSON("/api/learned/reject", method: "POST", body: ["text": text])
     }
 
     // MARK: - plumbing

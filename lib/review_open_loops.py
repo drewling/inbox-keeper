@@ -15,6 +15,7 @@ import argparse, json, os, subprocess, sys
 from email.utils import parseaddr
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import inbox_zero as iz       # noqa: E402
 import thin_protected as tp   # noqa: E402
@@ -22,6 +23,35 @@ import draftutil as du        # noqa: E402
 import learning               # noqa: E402
 
 CLAUDE = os.environ.get("CLAUDE_BIN", "claude")
+
+_CATEGORIES_PATH = os.path.join(ROOT, "categories.json")
+
+_DEFAULT_CATEGORIES = [
+    {"name": "Needs reply",      "description": "Someone is waiting on a direct response from me.", "emoji": "✉️"},
+    {"name": "Waiting on others","description": "I'm blocked on someone else; tracking, no action yet.", "emoji": "⏳"},
+    {"name": "To schedule",      "description": "Needs a meeting, call, or calendar action.",       "emoji": "📅"},
+    {"name": "Read later",       "description": "Worth reading but not urgent or action-bearing.",  "emoji": "🔖"},
+    {"name": "Action required",  "description": "A task or deadline I personally need to handle.",  "emoji": "⚡"},
+]
+
+
+def _categories():
+    """Return the categories list from categories.json, or built-in defaults."""
+    try:
+        if os.path.exists(_CATEGORIES_PATH):
+            with open(_CATEGORIES_PATH) as f:
+                data = json.load(f)
+            cats = data.get("categories", [])
+            if cats:
+                return cats
+    except Exception:
+        pass
+    return _DEFAULT_CATEGORIES
+
+
+def _category_label_name(cat):
+    """Compose the Gmail label name for a category: '<emoji> <name>'."""
+    return f"{cat['emoji']} {cat['name']}"
 
 # Candidate set: inbox minus starred/Action and (optionally) recent mail. Unlike the
 # blunt inbox_zero sweep, we do NOT pattern-exclude high-stakes mail here — the LLM
@@ -60,8 +90,8 @@ def _policy_text():
     return DEFAULT_POLICY
 
 
-# {policy} is filled from keep-policy.md at call time, so editing the policy
-# (file or Policy tab) actually changes behaviour.
+# {policy} is filled from keep-policy.md at call time.
+# {categories_section} is filled from categories.json at call time.
 PROMPT_HEAD = (
     "You are tidying the user's inbox. For EACH numbered thread decide \"keep\" or \"archive\". "
     "Keep only what genuinely needs the user to act now; bias hard toward archive (everything archived "
@@ -72,7 +102,9 @@ PROMPT_HEAD = (
     "Hard rules regardless of the above: if last_from_owner=YES the user already replied, so archive "
     "(nothing left to do). Personal, family, legal, and live-payment-problem mail are kept even if "
     "unsure.\n\n"
-    'Output ONLY a JSON object mapping each number to "keep" or "archive". No prose.\n\nTHREADS:\n'
+    "{categories_section}"
+    'Output ONLY a JSON object mapping each number to an object {{"decision":"keep"|"archive","category":<name>|null}}. '
+    "category must be one of the category names above (for kept threads) or null. No prose.\n\nTHREADS:\n"
 )
 
 _REPLIED = {}
@@ -142,13 +174,23 @@ def _learned_preface():
 
 
 def _classify(chunk):
+    cats = _categories()
+    cat_names = {c["name"] for c in cats}
+    cat_lines = "\n".join(f'  - {c["name"]}: {c["description"]}' for c in cats)
+    categories_section = (
+        "CATEGORIES — for each KEPT thread, also pick the best-fit category name from this list:\n"
+        + cat_lines + "\n\n"
+    )
+
     lines = []
     for i, c in enumerate(chunk):
         lines.append(
             f'{i}. last_sender: {c["last_from"]} | last_from_owner: {"YES" if c["last_from_tayo"] else "NO"}'
             f' | replied_before: {"YES" if c["replied_before"] else "NO"} | subject: {c["subject"]}'
             f' | snippet: {c["snippet"]}')
-    prompt = (_learned_preface() + PROMPT_HEAD.format(policy=_policy_text()) + "\n".join(lines))
+    prompt = (_learned_preface()
+              + PROMPT_HEAD.format(policy=_policy_text(), categories_section=categories_section)
+              + "\n".join(lines))
     try:
         r = subprocess.run([CLAUDE, "-p", prompt, "--model", "haiku"],
                            capture_output=True, text=True, timeout=150)
@@ -161,9 +203,94 @@ def _classify(chunk):
     if s < 0 or e < 0:
         return {}
     try:
-        return json.loads(txt[s:e + 1])
+        raw = json.loads(txt[s:e + 1])
     except Exception:
         return {}
+
+    # Normalize: accept both old bare-string form {"0":"keep"} and new object form
+    # {"0":{"decision":"keep","category":"Needs reply"}}.
+    normalized = {}
+    for k, v in raw.items():
+        if isinstance(v, str):
+            # Old format: bare "keep"/"archive" string.
+            normalized[k] = {"decision": v, "category": None}
+        elif isinstance(v, dict):
+            decision = v.get("decision", "keep")
+            cat = v.get("category")
+            if cat not in cat_names:
+                cat = None
+            normalized[k] = {"decision": decision, "category": cat}
+        else:
+            normalized[k] = {"decision": "keep", "category": None}
+    return normalized
+
+
+def apply_category(cfg, thread_id, category_name):
+    """Apply a category label to a kept thread: add '<emoji> <name>', remove any other
+    category labels from our set. Never touches non-category labels. Non-fatal on error.
+
+    Args:
+        cfg:           gws config_dir for the account.
+        thread_id:     Gmail thread id.
+        category_name: The category name string (must be in _categories()), or None to
+                       only remove stale category labels without adding a new one.
+    """
+    cats = _categories()
+    cat_label_names = {_category_label_name(c) for c in cats}
+    target_label = None
+    if category_name:
+        cat = next((c for c in cats if c["name"] == category_name), None)
+        if cat:
+            target_label = _category_label_name(cat)
+
+    try:
+        # Fetch current labels on this thread to find stale category labels to remove.
+        t = iz.gws(cfg, ["gmail", "users", "threads", "get",
+                         "--params", json.dumps({"userId": "me", "id": thread_id,
+                                                 "format": "metadata",
+                                                 "metadataHeaders": []})])
+        thread_label_ids = set()
+        for m in (t.get("messages") or []):
+            thread_label_ids.update(m.get("labelIds") or [])
+
+        # Resolve label ids -> names for our category labels only.
+        label_data = iz.gws(cfg, ["gmail", "users", "labels", "list",
+                                  "--params", json.dumps({"userId": "me"})])
+        all_labels = label_data.get("labels", []) or []
+        id_to_name = {l["id"]: l["name"] for l in all_labels}
+        name_to_id = {l["name"]: l["id"] for l in all_labels}
+
+        # Labels to remove: category labels currently on the thread (excluding the target).
+        remove_ids = [
+            lid for lid in thread_label_ids
+            if id_to_name.get(lid, "") in cat_label_names
+            and id_to_name.get(lid, "") != target_label
+        ]
+
+        if not target_label and not remove_ids:
+            return  # nothing to do
+
+        add_ids = []
+        if target_label:
+            # Ensure the target label exists in Gmail (create if missing).
+            if target_label not in name_to_id:
+                created = iz.gws(cfg, ["gmail", "users", "labels", "create",
+                                       "--params", json.dumps({"userId": "me"}),
+                                       "--json", json.dumps({"name": target_label,
+                                                             "labelListVisibility": "labelShow",
+                                                             "messageListVisibility": "show"})])
+                add_ids = [created["id"]]
+            else:
+                add_ids = [name_to_id[target_label]]
+
+        if add_ids or remove_ids:
+            iz.gws(cfg, ["gmail", "users", "threads", "modify",
+                         "--params", json.dumps({"userId": "me", "id": thread_id}),
+                         "--json", json.dumps({"addLabelIds": add_ids,
+                                               "removeLabelIds": remove_ids})],
+                   allow_empty=True)
+    except Exception:
+        pass  # category labeling is additive; never block the keeper run
 
 
 def main():
@@ -202,12 +329,20 @@ def main():
         chunk = to_judge[i:i + a.chunk]
         verdict = _classify(chunk)
         for j, c in enumerate(chunk):
-            if verdict.get(str(j), "keep") == "archive":
+            # _classify always returns normalized dicts; fall back to keep on missing key.
+            v = verdict.get(str(j), {"decision": "keep", "category": None})
+            decision = v.get("decision", "keep") if isinstance(v, dict) else v
+            category = v.get("category") if isinstance(v, dict) else None
+            if decision == "archive":
                 archive_msg_ids += c["ids"]
             else:
                 kept += 1
                 if len(keep_s) < 25:
-                    keep_s.append({"from": c["last_from"], "subject": c["subject"]})
+                    keep_s.append({"from": c["last_from"], "subject": c["subject"],
+                                   "category": category})
+                # Apply category label when executing; non-fatal if it fails.
+                if a.execute and category:
+                    apply_category(a.config_dir, c["id"], category)
 
     result = {"account": a.account_label, "threads": len(infos),
               "dealt_with_last_from_tayo": sum(1 for c in infos if c["last_from_tayo"]),

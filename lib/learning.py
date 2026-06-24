@@ -11,7 +11,7 @@ Signals are raw events here; lib/learn.py rolls them into a human-readable
 learning/learned.md that the keep-bar and draft prompts read. Nothing here
 silently changes the user's policy: the rollup is visible and editable.
 """
-import json, os, time
+import json, os, re, time
 from contextlib import contextmanager
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -19,6 +19,7 @@ ROOT = os.path.dirname(HERE)
 LEARN_DIR = os.path.join(ROOT, "learning")
 SIGNALS = os.path.join(LEARN_DIR, "signals.jsonl")
 LEARNED = os.path.join(LEARN_DIR, "learned.md")
+REJECTED = os.path.join(LEARN_DIR, "rejected.jsonl")
 
 try:
     import fcntl  # POSIX; this tool is macOS-only
@@ -75,3 +76,39 @@ def learned_text():
         with open(LEARNED) as f:
             return f.read()
     return ""
+
+
+def _norm(text):
+    """Normalise a bullet for reject matching: strip markers, lowercase, collapse ws."""
+    t = re.sub(r"^[\s\-\*•]+", "", text.strip())
+    return re.sub(r"\s+", " ", t).lower().strip()
+
+
+def reject_learning(text):
+    """Permanently suppress a learned preference.
+
+    Appends a record to rejected.jsonl and immediately removes any matching
+    bullet from learned.md. Future rollups (learn.py) also filter the reject
+    store, so the preference never comes back.
+    """
+    norm = _norm(text)
+    if not norm:
+        return
+    os.makedirs(LEARN_DIR, exist_ok=True)
+    # Append to reject store.
+    record = json.dumps({"ts": int(time.time()), "norm": norm, "original": text.strip()},
+                        ensure_ascii=False)
+    with _locked(REJECTED, "a") as f:
+        f.write(record + "\n")
+    # Remove matching bullets from learned.md immediately.
+    if not os.path.exists(LEARNED):
+        return
+    with open(LEARNED) as f:
+        lines = f.readlines()
+    kept = [l for l in lines if _norm(l) != norm]
+    if len(kept) == len(lines):
+        return  # nothing removed
+    tmp = LEARNED + ".tmp"
+    with open(tmp, "w") as f:
+        f.writelines(kept)
+    os.replace(tmp, LEARNED)

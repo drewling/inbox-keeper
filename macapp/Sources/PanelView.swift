@@ -12,12 +12,16 @@ struct PanelView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            VStack(spacing: 0) {
-                TopBar()
-                SegmentedNav(ns: segNS)
-                ContentArea()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                ActionBar()
+            if m.needsOnboarding {
+                OnboardingView()
+            } else {
+                VStack(spacing: 0) {
+                    TopBar()
+                    SegmentedNav(ns: segNS)
+                    ContentArea()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    ActionBar()
+                }
             }
 
             if let t = m.toastInfo {
@@ -32,11 +36,18 @@ struct PanelView: View {
         }
         .frame(width: PANEL_W, height: PANEL_H)
         .background(
-            // Warm depth over the vibrancy: a little darker/richer toward the bottom.
-            LinearGradient(colors: [Color(0.15, 0.135, 0.12).opacity(0.32),
-                                    Color(0.10, 0.09, 0.08).opacity(0.46)],
+            // Graphite depth over the vibrancy: clean and neutral, a touch deeper
+            // toward the bottom (no brown).
+            LinearGradient(colors: [Color(0.125, 0.122, 0.118).opacity(0.30),
+                                    Color(0.085, 0.083, 0.08).opacity(0.50)],
                            startPoint: .top, endPoint: .bottom)
         )
+        .overlay(alignment: .top) {
+            // Liquid-glass specular: a hairline of light catching the very top rim.
+            LinearGradient(colors: [Paper.hairline.opacity(0.16), .clear],
+                           startPoint: .top, endPoint: .bottom)
+                .frame(height: 1.5).allowsHitTesting(false)
+        }
         .foregroundStyle(Paper.ink)
         .tint(Paper.accent)
         .environment(\.colorScheme, .dark)
@@ -57,7 +68,7 @@ private struct TopBar: View {
                 .fill(LinearGradient(colors: [Paper.accentHi, Paper.accent], startPoint: .top, endPoint: .bottom))
                 .frame(width: 16, height: 16)
                 .overlay(Image(systemName: "checkmark")
-                    .font(.system(size: 8.5, weight: .bold)).foregroundStyle(Color(0.99, 0.975, 0.94)))
+                    .font(.system(size: 8.5, weight: .bold)).foregroundStyle(Color(0.99, 0.99, 1.0)))
                 .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .strokeBorder(.white.opacity(0.28), lineWidth: 0.5))
                 .shadow(color: Paper.accent.opacity(0.4), radius: 3, y: 1)
@@ -83,11 +94,10 @@ private struct TopBar: View {
 
 private struct AccountDot: View {
     let account: Account
+    private let size: CGFloat = 27
     var body: some View {
-        Circle()
-            .fill(Color(hex: account.color))
-            .frame(width: 27, height: 27)
-            .overlay(Text(account.short).font(.system(size: 10, weight: .bold)).foregroundStyle(.white))
+        // Same circular avatar the rows and cards use, for one consistent account mark.
+        Avatar(text: account.short, color: Color(hex: account.color), photoURL: account.photoURL, size: size)
             .overlay {
                 if !account.ok {
                     Circle().strokeBorder(Paper.danger, lineWidth: 1.5)
@@ -95,12 +105,17 @@ private struct AccountDot: View {
             }
             .overlay(alignment: .topTrailing) {
                 if account.inboxThreads > 0 {
+                    // A clean, neutral count pill cut into the panel — graphite fill +
+                    // a faint cool rim — so it reads the same on every account colour
+                    // instead of clashing a terracotta badge over a coloured chip.
                     Text(account.inboxThreads > 99 ? "99+" : "\(account.inboxThreads)")
-                        .font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
-                        .padding(.horizontal, 4).frame(minWidth: 15, minHeight: 15)
-                        .background(Capsule().fill(Paper.accent))
-                        .overlay(Capsule().strokeBorder(Paper.paper.opacity(0.85), lineWidth: 1.2))
-                        .offset(x: 6, y: -5)
+                        .font(.system(size: 9.5, weight: .bold)).foregroundStyle(Paper.ink)
+                        .monospacedDigit()
+                        .padding(.horizontal, account.inboxThreads > 9 ? 3.5 : 0)
+                        .frame(minWidth: 16, minHeight: 16)
+                        .background(Capsule().fill(Paper.paper))
+                        .overlay(Capsule().strokeBorder(Paper.hairline.opacity(0.32), lineWidth: 0.75))
+                        .offset(x: 5, y: -6)
                 }
             }
             .help(account.email + (account.ok ? "" : " — needs attention"))
@@ -226,9 +241,14 @@ private struct LoopRowView: View {
     @State private var hovering = false
     var body: some View {
         HStack(spacing: 11) {
-            InitialsChip(text: row.account.short, color: Color(hex: row.account.color))
-            VStack(alignment: .leading, spacing: 1) {
-                Text(row.loop.sender).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+            Avatar(text: row.account.short, color: Color(hex: row.account.color), photoURL: row.account.photoURL)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(row.loop.sender).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    if let cat = m.state?.category(named: row.loop.category) {
+                        CategoryTag(category: cat)
+                    }
+                }
                 Text(row.loop.subject).font(.system(size: 12.5)).foregroundStyle(Paper.ink3).lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -300,7 +320,7 @@ private struct AccountCard: View {
     let account: Account
     var body: some View {
         HStack(spacing: 12) {
-            InitialsChip(text: account.short, color: Color(hex: account.color), size: 34)
+            Avatar(text: account.short, color: Color(hex: account.color), photoURL: account.photoURL, size: 34)
             VStack(alignment: .leading, spacing: 2) {
                 Text(account.email).font(.system(size: 13, weight: .medium)).lineLimit(1)
                 Text(statLine).font(.system(size: 11.5))
@@ -330,7 +350,12 @@ private struct UndoView: View {
     private var items: [(point: UndoPoint, account: Account)] {
         var out: [(UndoPoint, Account)] = []
         for a in m.state?.accounts ?? [] { for u in a.undoPoints { out.append((u, a)) } }
-        return out.sorted { $0.0.date > $1.0.date }
+        // Newest dates first; the undated "earlier" bucket always sorts last.
+        return out.sorted { a, b in
+            if a.0.date == "earlier" { return false }
+            if b.0.date == "earlier" { return true }
+            return a.0.date > b.0.date
+        }
     }
     var body: some View {
         if items.isEmpty {
@@ -342,7 +367,9 @@ private struct UndoView: View {
                     Text("Nothing is ever deleted. Each point restores a day’s set-aside threads back to the inbox in one tap.")
                         .font(.system(size: 12)).foregroundStyle(Paper.ink3)
                         .padding(.horizontal, 4).padding(.bottom, 4)
-                    ForEach(items, id: \.point.id) { item in
+                    // Key on position: an undo point's label/date can repeat across
+                    // accounts, so \.point.id alone collides and SwiftUI duplicates rows.
+                    ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                         UndoRow(point: item.point, account: item.account)
                     }
                 }
@@ -371,62 +398,223 @@ private struct UndoRow: View {
     }
 }
 
-// MARK: - Policy
+// MARK: - Settings (keep policy · categories · learned)
 
 private struct PolicyView: View {
-    @EnvironmentObject var m: KeeperModel
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("The **only** thing you configure. Describe what counts as “still needs me” in plain English. The agent reads each thread and enforces it.")
-                    .font(.system(size: 12)).foregroundStyle(Paper.ink2)
-
-                TextEditor(text: $m.policyDraft)
-                    .font(.system(size: 12.5, design: .monospaced))
-                    .scrollContentBackground(.hidden)
-                    .frame(minHeight: 150)
-                    .padding(8)
-                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Paper.sunken.opacity(0.24))
-                        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Paper.hairline.opacity(0.12), lineWidth: 0.5)))
-
-                let learned = (m.state?.learned ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                if learned.isEmpty {
-                    Text("As you set loops aside and edit drafts, the keeper learns your preferences and shows them here.")
-                        .font(.system(size: 12)).foregroundStyle(Paper.ink4)
-                } else {
-                    SectionLabel("Learned from your actions").padding(.top, 4)
-                    MarkdownLite(text: stripLeadingHeading(learned))
-                }
+            VStack(alignment: .leading, spacing: 24) {
+                KeepPolicySection()
+                CategoriesSection()
+                LearnedSection()
             }
-            .padding(.horizontal, 16).padding(.vertical, 14)
+            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 18)
         }
-    }
-    private func stripLeadingHeading(_ s: String) -> String {
-        guard s.hasPrefix("#") else { return s }
-        return s.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).dropFirst().joined(separator: "\n")
     }
 }
 
-// Minimal markdown for the learned block: ## headings, - bullets, **bold**.
-private struct MarkdownLite: View {
-    let text: String
+// Shared section header: a bright title + a quiet one-line description. Kept clearly
+// legible on the glass (title in primary ink, subtitle in ink3, never the dim ink4).
+private struct SettingsHeader: View {
+    let title: String; let subtitle: String
+    init(_ title: String, _ subtitle: String) { self.title = title; self.subtitle = subtitle }
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            ForEach(Array(text.split(separator: "\n", omittingEmptySubsequences: false).enumerated()), id: \.offset) { _, raw in
-                let line = String(raw)
-                if line.hasPrefix("#") {
-                    Text(inline(line.drop { $0 == "#" }.trimmingCharacters(in: .whitespaces)))
-                        .font(.system(size: 12.5, weight: .semibold)).padding(.top, 3)
-                } else if line.hasPrefix("- ") || line.hasPrefix("* ") {
-                    HStack(alignment: .top, spacing: 6) {
-                        Text("•").foregroundStyle(Paper.ink4)
-                        Text(inline(String(line.dropFirst(2)))).font(.system(size: 12)).foregroundStyle(Paper.ink2)
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Paper.ink)
+            Text(subtitle).font(.system(size: 12)).foregroundStyle(Paper.ink3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+private struct KeepPolicySection: View {
+    @EnvironmentObject var m: KeeperModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsHeader("What to keep",
+                           "Describe what counts as “still needs me” in plain English. The agent reads every thread and enforces it.")
+            TextEditor(text: $m.policyDraft)
+                .font(.system(size: 12.5, design: .monospaced))
+                .foregroundStyle(Paper.ink)
+                .scrollContentBackground(.hidden)
+                .frame(minHeight: 130)
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Paper.sunken.opacity(0.24))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Paper.hairline.opacity(0.12), lineWidth: 0.5)))
+            HStack { Spacer(); Button("Save") { m.savePolicy() }.buttonStyle(GhostButtonStyle()) }
+        }
+    }
+}
+
+// MARK: Categories editor
+
+private struct CategoriesSection: View {
+    @EnvironmentObject var m: KeeperModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsHeader("Categories",
+                           "Buckets the keeper sorts your open loops into. Each becomes a Gmail label and a tag on the list. They pass to the agent on the next run.")
+            VStack(spacing: 8) {
+                ForEach($m.categoriesDraft) { $cat in
+                    CategoryEditRow(cat: $cat) { m.removeCategory(cat.id) }
+                }
+            }
+            HStack(spacing: 10) {
+                Button { withAnimation(.snappy(duration: 0.25)) { m.addCategory() } } label: {
+                    Label("Add category", systemImage: "plus")
+                }
+                .buttonStyle(GhostButtonStyle())
+                Spacer()
+                Button { m.saveCategories() } label: {
+                    HStack(spacing: 6) {
+                        if m.categoriesSaving { ProgressView().controlSize(.small) }
+                        Text("Save categories")
                     }
-                } else if !line.trimmingCharacters(in: .whitespaces).isEmpty {
-                    Text(inline(line)).font(.system(size: 12)).foregroundStyle(Paper.ink2)
+                }
+                .buttonStyle(GhostButtonStyle()).disabled(m.categoriesSaving)
+            }
+        }
+    }
+}
+
+private struct CategoryEditRow: View {
+    @Binding var cat: Category
+    let onDelete: () -> Void
+    @State private var hovering = false
+
+    private var colorBinding: Binding<Color> {
+        Binding(get: { Color(hex: cat.color) }, set: { cat.color = $0.hexString() })
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            // Emoji, framed in the category's own colour so the row reads as a chip.
+            TextField("🏷️", text: $cat.emoji)
+                .textFieldStyle(.plain).multilineTextAlignment(.center)
+                .font(.system(size: 15)).frame(width: 30, height: 30)
+                .background(Circle().fill(Color(hex: cat.color).opacity(0.20)))
+                .overlay(Circle().strokeBorder(Color(hex: cat.color).opacity(0.5), lineWidth: 1))
+
+            VStack(alignment: .leading, spacing: 2) {
+                TextField("Name", text: $cat.name)
+                    .textFieldStyle(.plain).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Paper.ink)
+                TextField("When should the keeper use this?", text: $cat.description)
+                    .textFieldStyle(.plain).font(.system(size: 11.5)).foregroundStyle(Paper.ink3)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            ColorPicker("", selection: colorBinding, supportsOpacity: false)
+                .labelsHidden().frame(width: 22)
+                .help("Tag colour")
+
+            Button(action: onDelete) {
+                Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(hovering ? Paper.danger : Paper.ink4)
+                    .frame(width: 24, height: 24).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).onHover { hovering = $0 }
+            .accessibilityLabel("Delete category")
+        }
+        .padding(10)
+        .glassSurface(11)
+        .transition(.opacity.combined(with: .move(edge: .leading)))
+    }
+}
+
+// MARK: Learned-from-your-actions
+
+private struct LearnedSection: View {
+    @EnvironmentObject var m: KeeperModel
+    var body: some View {
+        let learned = (m.state?.learned ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsHeader("Learned from your actions",
+                           "Built from your draft edits and what you restore. Delete anything that’s off; it won’t come back.")
+            if learned.isEmpty {
+                HStack(spacing: 9) {
+                    Image(systemName: "sparkles").font(.system(size: 12)).foregroundStyle(Paper.accentSoft)
+                    Text("Nothing yet. As you edit drafts and restore threads, the keeper learns your voice and what matters to you here.")
+                        .font(.system(size: 12)).foregroundStyle(Paper.ink3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                .glassSurface(11)
+            } else {
+                LearnedList(text: learned)
+            }
+        }
+    }
+}
+
+// Parses the learned markdown into grouped, deletable items. Deleting suppresses an
+// item on the server so it's never re-learned.
+private struct LearnedList: View {
+    @EnvironmentObject var m: KeeperModel
+    let text: String
+
+    private struct Item: Identifiable { let id = UUID(); let text: String; let heading: Bool }
+
+    private var items: [Item] {
+        var out: [Item] = []
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty || line.hasPrefix(">") { continue }   // skip the preamble blockquote
+            if line.hasPrefix("##") {                              // h2 → group heading
+                let t = line.drop { $0 == "#" }.trimmingCharacters(in: .whitespaces)
+                if !t.isEmpty { out.append(Item(text: t, heading: true)) }
+            } else if line.hasPrefix("#") {                        // h1 title → skip (we show our own)
+                continue
+            } else {
+                let t = (line.hasPrefix("- ") || line.hasPrefix("* ")) ? String(line.dropFirst(2)) : line
+                let key = t.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !key.isEmpty, !m.locallyRejected.contains(key) {
+                    out.append(Item(text: t, heading: false))
                 }
             }
         }
+        return out
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            ForEach(items) { item in
+                if item.heading {
+                    Text(item.text.uppercased()).font(.system(size: 10, weight: .semibold)).kerning(0.6)
+                        .foregroundStyle(Paper.ink3).padding(.top, 8).padding(.horizontal, 2)
+                } else {
+                    LearnedItemRow(text: item.text)
+                }
+            }
+        }
+    }
+}
+
+private struct LearnedItemRow: View {
+    @EnvironmentObject var m: KeeperModel
+    let text: String
+    @State private var hovering = false
+    var body: some View {
+        HStack(alignment: .top, spacing: 11) {
+            Image(systemName: "sparkle").font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Paper.accentSoft).padding(.top, 1)
+            Text(inline(text)).font(.system(size: 12.5)).foregroundStyle(Paper.ink)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) { m.rejectLearned(text) }
+            } label: {
+                Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(hovering ? Paper.danger : Paper.ink4)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).help("Delete this — it won’t be learned again")
+            .accessibilityLabel("Delete learned preference")
+        }
+        .padding(.vertical, 10).padding(.horizontal, 12)
+        .glassSurface(11)
+        .onHover { hovering = $0 }
+        .transition(.opacity.combined(with: .move(edge: .leading)))
     }
     private func inline(_ s: String) -> AttributedString {
         (try? AttributedString(markdown: s)) ?? AttributedString(s)
@@ -533,22 +721,17 @@ private struct ActionBar: View {
     @EnvironmentObject var m: KeeperModel
     var body: some View {
         HStack(spacing: 10) {
-            if m.tab == .policy {
-                Spacer()
-                Button("Save policy") { m.savePolicy() }.buttonStyle(GhostButtonStyle())
-            } else {
-                Text(statusText)
-                    .font(.system(size: 11.5)).foregroundStyle(m.isBusy ? Paper.accent : Paper.ink3)
-                    .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-                Button { m.runKeeper() } label: {
-                    HStack(spacing: 6) {
-                        if m.isBusy { ProgressView().controlSize(.small).tint(.white) }
-                        else { Image(systemName: "arrow.clockwise").font(.system(size: 12, weight: .semibold)) }
-                        Text(m.isBusy ? "Keeping…" : "Run keeper now")
-                    }
+            Text(statusText)
+                .font(.system(size: 11.5)).foregroundStyle(m.isBusy ? Paper.accent : Paper.ink3)
+                .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+            Button { m.runKeeper() } label: {
+                HStack(spacing: 6) {
+                    if m.isBusy { ProgressView().controlSize(.small).tint(.white) }
+                    else { Image(systemName: "arrow.clockwise").font(.system(size: 12, weight: .semibold)) }
+                    Text(m.isBusy ? "Keeping…" : "Run keeper now")
                 }
-                .buttonStyle(PrimaryButtonStyle(enabled: !m.isBusy)).disabled(m.isBusy)
             }
+            .buttonStyle(PrimaryButtonStyle(enabled: !m.isBusy)).disabled(m.isBusy)
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
         .background(Paper.raised.opacity(0.05))
@@ -632,14 +815,19 @@ private struct SkeletonView: View {
 private struct ToastView: View {
     let info: ToastInfo
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             Text(info.message).font(.system(size: 12.5, weight: .medium)).foregroundStyle(.white)
+                .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
             if let undo = info.undo {
                 Button("Undo") { undo() }
                     .buttonStyle(.plain).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Paper.accentSoft)
             }
         }
-        .padding(.horizontal, 16).padding(.vertical, 10)
-        .background(Capsule().fill(Paper.paper.opacity(0.96)).shadow(color: .black.opacity(0.22), radius: 12, y: 4))
+        .padding(.horizontal, 16).padding(.vertical, 11)
+        .frame(maxWidth: 320)
+        // Long messages (e.g. setup guidance) get a rounded card, not a stretched
+        // pill; near-opaque dark so white text stays crisp over any background.
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .fill(Paper.paper.opacity(0.985)).shadow(color: .black.opacity(0.3), radius: 14, y: 5))
     }
 }

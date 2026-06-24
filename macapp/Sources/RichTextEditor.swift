@@ -8,7 +8,7 @@ import AppKit
 
 private enum InkNS {
     static let text   = NSColor(srgbRed: 0.227, green: 0.196, blue: 0.165, alpha: 1)
-    static let accent = NSColor(srgbRed: 0.792, green: 0.420, blue: 0.298, alpha: 1)
+    static let accent = NSColor(srgbRed: 0.102, green: 0.451, blue: 0.910, alpha: 1)  // Google blue links
     static let font   = NSFont.systemFont(ofSize: 13)
 }
 

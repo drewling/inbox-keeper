@@ -27,6 +27,7 @@ PANEL_DIR = os.path.join(ROOT, "app", "panel")
 STATE_PATH = os.path.join(ROOT, "app", "state.json")
 POLICY_PATH = os.path.join(ROOT, "keep-policy.md")
 ACCOUNTS_PATH = os.path.join(ROOT, "accounts.json")
+CATEGORIES_PATH = os.path.join(ROOT, "categories.json")
 PYTHON = sys.executable or "python3"
 CLAUDE = os.environ.get("CLAUDE_BIN", "claude")
 
@@ -89,6 +90,36 @@ def _patch_state(mutate):
         with open(tmp, "w") as f:
             json.dump(st, f, ensure_ascii=False, indent=2)
         os.replace(tmp, STATE_PATH)
+
+
+def _bump_undo_point(slug, label, delta):
+    """Reflect a per-loop set-aside (+1) or its undo (-1) in the cached undo points
+    so the Undo tab's day count moves immediately, without a full rebuild. Matches
+    dashboard_state's {label, date, count} shape and sort exactly. The thread carries
+    the same dated recovery label as the daily run, so restoring that day brings these
+    set-aside threads back too."""
+    import re
+    m = re.search(r"\d{4}-\d{2}-\d{2}", label or "")
+    date = m.group(0) if m else "earlier"
+
+    def _m(st):
+        for a in st.get("accounts", []):
+            if a.get("slug") != slug:
+                continue
+            pts = a.setdefault("undo_points", [])
+            pt = next((p for p in pts if p.get("date") == date), None)
+            if pt is None:
+                if delta > 0:
+                    pts.append({"label": label, "date": date, "count": delta})
+            else:
+                pt["count"] = max(0, pt.get("count", 0) + delta)
+                if pt["count"] <= 0:
+                    pts.remove(pt)
+                elif label and label > pt.get("label", ""):
+                    pt["label"] = label   # keep the most recent label as restore target
+            pts.sort(key=lambda p: ("0" if p.get("date") == "earlier" else p.get("date", "")),
+                     reverse=True)
+    _patch_state(_m)
 
 
 def _build_state_blocking():
@@ -176,6 +207,10 @@ def _run_undo(payload):
                                             "addLabelIds": ["INBOX"],
                                             "removeLabelIds": [lab["id"]]})],
                 allow_empty=True)
+    import learning  # noqa: E402
+    # Bulk restore = a strong "keep more of this batch" signal.
+    learning.record({"type": "keep_override_undo", "account": slug,
+                     "label": label_name, "message_count": len(msg_ids)})
     _set_job_message(f"Restored {len(msg_ids)} messages. Refreshing...")
     _build_state_blocking()
 
@@ -207,7 +242,10 @@ def _dismiss(payload):
                       "--params", json.dumps({"userId": "me", "id": tid}),
                       "--json", json.dumps({"addLabelIds": ["INBOX"], "removeLabelIds": remove})],
                 allow_empty=True)
-        learning.record({"type": "keep_override_undo", "account": slug, "thread_id": tid})
+        learning.record({"type": "keep_override_undo", "account": slug, "thread_id": tid,
+                         "sender": payload.get("sender", ""),
+                         "sender_email": payload.get("sender_email", ""),
+                         "subject": payload.get("subject", "")})
 
         def _readd(st):
             for a in st.get("accounts", []):
@@ -221,6 +259,7 @@ def _dismiss(payload):
                         "epoch": payload.get("epoch", 0), "account_slug": slug})
                     a["inbox_threads"] = a.get("inbox_threads", 0) + 1
         _patch_state(_readd)
+        _bump_undo_point(slug, label, -1)   # came back out of that day's bucket
         return {"ok": True, "restored": tid}
 
     label = iz._dated_label(iz._BASE_LABEL)
@@ -236,6 +275,7 @@ def _dismiss(payload):
                      "subject": payload.get("subject", ""),
                      "snippet": payload.get("snippet", "")})
     _drop_loop(slug, tid)
+    _bump_undo_point(slug, label, +1)   # show it in today's Undo bucket right away
     return {"ok": True, "label": label, "thread_id": tid}
 
 
@@ -261,6 +301,7 @@ def _gen_draft(payload):
     sys.path.insert(0, HERE)
     import draftutil as du       # noqa: E402
     import learning              # noqa: E402
+    import voicesampler as vs    # noqa: E402  — voice exemplar fetcher / cache
     from email.utils import parseaddr
     slug, tid = payload.get("slug"), payload.get("thread_id")
     steer = (payload.get("steer") or "").strip()
@@ -295,8 +336,55 @@ def _gen_draft(payload):
     chosen = recipient_from or last_from  # whole thread from owner -> reply to last
     to_name = parseaddr(chosen)[0] or parseaddr(chosen)[1] or chosen
     to_email = parseaddr(chosen)[1] or ""
+
+    # --- Voice exemplars: owner's own sent messages as concrete style samples ----
+    # Cached on disk per account (TTL 7 days) to keep per-draft latency low.
+    general_exemplars = []
+    try:
+        general_exemplars = vs.get_voice_exemplars(cfg, slug)
+    except Exception:
+        pass  # non-fatal; draft continues without exemplars
+
+    # --- Per-recipient exemplars + relationship tier ----------------------------
+    # Run live (small result set, recipient-specific — not worth caching).
+    rel_tier = "new"          # "new" | "known"
+    recip_exemplars = []
+    if to_email:
+        try:
+            rel_tier, recip_exemplars = vs.get_recipient_exemplars(
+                cfg, to_email, owner, tid)
+        except Exception:
+            pass  # non-fatal
+
+    # Build voice-exemplar block: recipient-specific samples take priority;
+    # pad with general sent-mail samples up to ~6 total.
+    all_exemplars = recip_exemplars + [
+        e["body"] for e in general_exemplars
+        if e["body"] not in recip_exemplars
+    ]
+    all_exemplars = all_exemplars[:6]
+
+    exemplar_block = ""
+    if all_exemplars:
+        owner_label = owner_name or "the owner"
+        samples_text = "\n\n---\n".join(all_exemplars)
+        exemplar_block = (
+            f"\nHERE IS HOW {owner_label.upper()} ACTUALLY WRITES"
+            + (" (especially to this recipient)" if recip_exemplars else "")
+            + " — imitate this style, not a generic professional tone:\n"
+            + samples_text + "\n"
+        )
+
+    # Relationship tier influences formality instruction.
+    if rel_tier == "known":
+        tier_note = f" You have exchanged emails with {to_name} before — match the warmth and familiarity of those prior exchanges."
+    else:
+        tier_note = f" {to_name} appears to be a new or infrequent contact — be friendly but appropriately professional."
+
+    # Voice notes from past user edits (rollup from learning/learned.md).
     voice = learning.learned_text()
-    voice_block = f"\nVOICE NOTES learned from the user's past edits:\n{voice}\n" if voice.strip() else ""
+    voice_block = f"\nVOICE NOTES learned from past edits:\n{voice}\n" if voice.strip() else ""
+
     # Optional profile context: knowledge/<slug>.md, then knowledge/profile.md.
     prof_block = ""
     for fn in (f"{slug}.md", "profile.md"):
@@ -309,13 +397,23 @@ def _gen_draft(payload):
             if txt:
                 prof_block = "\nABOUT THE USER (background for voice/context, do not quote verbatim):\n" + txt[:1500] + "\n"
             break
+
     voice_desc = f"{owner_name}'s voice" if owner_name else "the user's voice"
     sign = f' Sign off as "{owner_first}".' if owner_first else ""
+
     prompt = (
-        f"Draft a reply in {voice_desc} to the email thread below. First person, warm and concise "
-        "(2-6 sentences), match the sender's language and level of formality, reference real thread "
-        "context, never invent facts, figures or dates (use placeholders like [day]/[amount] if "
-        f"needed).{sign} Reply to {to_name}.{prof_block}{voice_block}"
+        f"Draft a reply in {voice_desc} to the email thread below.\n"
+        "Rules:\n"
+        "- First person, concise (2–6 sentences unless the thread clearly calls for more)\n"
+        "- Match the sender's language and level of formality\n"
+        "- Reference real thread context; never invent facts, figures or dates "
+        "(use placeholders like [day] / [amount] if needed)\n"
+        "- " + (sign[1:].strip() if sign else "Sign off with the owner's first name.") + "\n"
+        "- Infer what kind of email this is (scheduling, client update, cold reply, "
+        "logistics, question/decision, thanks, intro, etc.) and write the way the "
+        "owner typically handles that kind — see the exemplars below for cues\n"
+        f"- Reply is addressed to: {to_name}.{tier_note}\n"
+        f"{prof_block}{exemplar_block}{voice_block}"
         + (f"\nADJUSTMENT requested: {steer}\n" if steer else "")
         + f"\nSubject: {subject}\nThread (oldest to newest):\n" + "\n".join(convo[-8:])
         + "\n\nOutput ONLY the reply body text, no preamble, no subject line."
@@ -383,19 +481,62 @@ def _add_account(payload):
     credentials."""
     import time as _time
     import shutil
+    import glob as _glob
     home = os.path.expanduser("~")
-    pending = os.path.join(home, ".config", "gws", "accounts", f"pending-{int(_time.time())}")
+    gws_root = os.path.join(home, ".config", "gws")
+    pending = os.path.join(gws_root, "accounts", f"pending-{int(_time.time())}")
     os.makedirs(pending, exist_ok=True)
     committed = False
     created_dir = None
+    # Reuse the OAuth client the existing accounts already use, so adding another
+    # account doesn't make the user create a brand-new Google Cloud client. We copy
+    # only the client app credentials (client_secret.json), never any user tokens.
+    # A first-ever account has none to copy and falls through to the setup guidance.
+    def _existing_client_secret():
+        prefer = os.path.join(gws_root, "client_secret.json")
+        if os.path.isfile(prefer):
+            return prefer
+        for hit in _glob.glob(os.path.join(gws_root, "**", "client_secret.json"), recursive=True):
+            if os.path.commonpath([hit, pending]) != pending:   # not the (empty) new dir
+                return hit
+        return None
     try:
+        _seed = _existing_client_secret()
+        if _seed:
+            shutil.copyfile(_seed, os.path.join(pending, "client_secret.json"))
         env = _gws_env()
         env["GOOGLE_WORKSPACE_CLI_CONFIG_DIR"] = pending
         _set_job_message("Opening your browser to sign in...")
         r = subprocess.run(["gws", "auth", "login"], env=env,
                            capture_output=True, text=True, timeout=300)
         if r.returncode != 0:
-            raise RuntimeError("sign-in didn't complete: " + (r.stderr or r.stdout or "")[-200:])
+            raw = (r.stderr or r.stdout or "").strip()
+            # Detect the missing-OAuth-client failure before surfacing a truncated message.
+            _cred_hints = ("client_id", "client_secret", "GOOGLE_WORKSPACE_CLI_CLIENT",
+                           "client_secret.json", "Cloud Console")
+            if any(h.lower() in raw.lower() for h in _cred_hints) or not raw:
+                gws_cfg_dir = os.path.join(os.path.expanduser("~"), ".config", "gws")
+                client_secret_path = os.path.join(gws_cfg_dir, "client_secret.json")
+                raise RuntimeError(
+                    "gws needs Google OAuth client credentials before it can sign you in. "
+                    "To fix this, do ONE of the following:\n\n"
+                    "Option A — client_secret.json (recommended):\n"
+                    "  1. Open https://console.cloud.google.com/ and select your project "
+                    "(or create one).\n"
+                    "  2. Go to APIs & Services → Credentials → Create Credentials → "
+                    "OAuth client ID.\n"
+                    "  3. Choose 'Desktop app', name it anything, click Create.\n"
+                    "  4. Download the JSON file and save it to:\n"
+                    f"       {client_secret_path}\n"
+                    "  5. Make sure the Gmail API is enabled for your project "
+                    "(APIs & Services → Enable APIs → search 'Gmail API').\n"
+                    "  6. Click 'Add account' again.\n\n"
+                    "Option B — environment variables:\n"
+                    "  Set GOOGLE_WORKSPACE_CLI_CLIENT_ID and "
+                    "GOOGLE_WORKSPACE_CLI_CLIENT_SECRET in your environment, "
+                    "then restart the app and try again."
+                )
+            raise RuntimeError("sign-in didn't complete: " + raw[-400:])
         prof = subprocess.run(["gws", "gmail", "users", "getProfile", "--params",
                                json.dumps({"userId": "me"})], env=env,
                               capture_output=True, text=True, timeout=60)
@@ -438,6 +579,29 @@ def _add_account(payload):
             shutil.rmtree(pending, ignore_errors=True)
             if created_dir:
                 shutil.rmtree(created_dir, ignore_errors=True)
+
+
+_DEFAULT_CATEGORIES = [
+    {"name": "Needs reply",      "description": "Someone is waiting on a direct response from me.", "color": "#4285F4", "emoji": "✉️"},
+    {"name": "Waiting on others","description": "I'm blocked on someone else; tracking, no action yet.", "color": "#AB47BC", "emoji": "⏳"},
+    {"name": "To schedule",      "description": "Needs a meeting, call, or calendar action.",       "color": "#0F9D58", "emoji": "📅"},
+    {"name": "Read later",       "description": "Worth reading but not urgent or action-bearing.",  "color": "#00838F", "emoji": "🔖"},
+    {"name": "Action required",  "description": "A task or deadline I personally need to handle.",  "color": "#DB4437", "emoji": "⚡"},
+]
+
+
+def _read_categories():
+    """Return categories list from categories.json, or defaults if file is missing."""
+    try:
+        if os.path.isfile(CATEGORIES_PATH):
+            with open(CATEGORIES_PATH) as f:
+                data = json.load(f)
+            cats = data.get("categories", [])
+            if cats:
+                return cats
+    except Exception:
+        pass
+    return _DEFAULT_CATEGORIES
 
 
 _JOB_KINDS = {"refresh": lambda p: _build_state_blocking(),
@@ -542,6 +706,8 @@ class Handler(BaseHTTPRequestHandler):
                 with open(POLICY_PATH) as f:
                     text = f.read()
             return self._send(200, {"policy": text})
+        if p == "/api/categories":
+            return self._send(200, {"categories": _read_categories()})
         return self._serve_static(p)
 
     def do_POST(self):
@@ -549,6 +715,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, {"error": "cross-site request blocked"})
         p = urlparse(self.path).path
         payload = self._body_json()
+        # Reject a learned preference: remove from learned.md + add to reject store.
+        if p == "/api/learned/reject":
+            text = payload.get("text", "").strip()
+            if not text:
+                return self._send(400, {"error": "text is required"})
+            try:
+                sys.path.insert(0, HERE)
+                import learning  # noqa: E402
+                learning.reject_learning(text)
+            except Exception as exc:
+                return self._send(500, {"error": str(exc)})
+            return self._send(200, {"ok": True})
+
         # Fast synchronous endpoints (one thread / one model call), not the job slot.
         _sync = {"/api/dismiss": _dismiss, "/api/draft": _gen_draft,
                  "/api/draft/send": _send_draft}
@@ -570,17 +749,42 @@ class Handler(BaseHTTPRequestHandler):
         if not self._is_local_request():
             return self._send(403, {"error": "cross-site request blocked"})
         p = urlparse(self.path).path
-        if p != "/api/policy":
-            return self._send(404, {"error": "not found"})
         payload = self._body_json()
-        text = payload.get("policy", "")
-        if not isinstance(text, str):
-            return self._send(400, {"error": "policy must be a string"})
-        tmp = POLICY_PATH + ".tmp"
-        with open(tmp, "w") as f:
-            f.write(text)
-        os.replace(tmp, POLICY_PATH)
-        return self._send(200, {"ok": True})
+
+        if p == "/api/policy":
+            text = payload.get("policy", "")
+            if not isinstance(text, str):
+                return self._send(400, {"error": "policy must be a string"})
+            tmp = POLICY_PATH + ".tmp"
+            with open(tmp, "w") as f:
+                f.write(text)
+            os.replace(tmp, POLICY_PATH)
+            return self._send(200, {"ok": True})
+
+        if p == "/api/categories":
+            cats = payload.get("categories")
+            if not isinstance(cats, list):
+                return self._send(400, {"error": "categories must be a list"})
+            validated = []
+            for item in cats:
+                if not isinstance(item, dict):
+                    return self._send(400, {"error": "each category must be an object"})
+                name = item.get("name")
+                if not isinstance(name, str) or not name.strip():
+                    return self._send(400, {"error": "each category must have a non-empty string 'name'"})
+                validated.append({
+                    "name": name.strip(),
+                    "description": str(item.get("description", "")) if item.get("description") is not None else "",
+                    "color": str(item.get("color", "#5C6BC0")) if item.get("color") else "#5C6BC0",
+                    "emoji": str(item.get("emoji", "🏷️")) if item.get("emoji") else "🏷️",
+                })
+            tmp = CATEGORIES_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"categories": validated}, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, CATEGORIES_PATH)
+            return self._send(200, {"ok": True})
+
+        return self._send(404, {"error": "not found"})
 
 
 def main():
