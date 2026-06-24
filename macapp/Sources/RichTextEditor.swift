@@ -7,8 +7,8 @@ import SwiftUI
 import AppKit
 
 private enum InkNS {
-    static let text   = NSColor(srgbRed: 0.227, green: 0.196, blue: 0.165, alpha: 1)
-    static let accent = NSColor(srgbRed: 0.102, green: 0.451, blue: 0.910, alpha: 1)  // Google blue links
+    static let text   = NSColor(srgbRed: 0.97, green: 0.965, blue: 0.96, alpha: 1)    // light ink — the composer is dark glass, not white paper
+    static let accent = NSColor(srgbRed: 0.541, green: 0.706, blue: 0.973, alpha: 1)  // accentSoft #8AB4F8 — links legible on dark
     static let font   = NSFont.systemFont(ofSize: 13)
 }
 

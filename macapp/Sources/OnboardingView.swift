@@ -86,7 +86,7 @@ private struct TrustRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: symbol).font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Paper.accent).frame(width: 18)
+                .foregroundStyle(Paper.accentSoft).frame(width: 18)
             Text(text).font(.system(size: 12)).foregroundStyle(Paper.ink2)
                 .fixedSize(horizontal: false, vertical: true)
         }

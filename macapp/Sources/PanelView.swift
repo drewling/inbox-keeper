@@ -143,6 +143,7 @@ private struct SegmentedNav: View {
                     Text(tab.title)
                         .font(.system(size: 12.5, weight: on ? .semibold : .medium))
                         .foregroundStyle(on ? Paper.ink : Paper.ink3)
+                        .legibleOnGlass()
                         .frame(maxWidth: .infinity).frame(height: 28)
                         .background {
                             if on {
@@ -236,7 +237,7 @@ private struct HeroCount: View {
         VStack(spacing: 2) {
             // The count rolls digit-by-digit when something is set aside or a run
             // finishes — the inbox visibly getting lighter.
-            Text("\(total)").font(.system(size: 46, weight: .bold)).foregroundStyle(Paper.accent).kerning(-1)
+            Text("\(total)").font(.system(size: 46, weight: .bold)).foregroundStyle(Paper.accentSoft).kerning(-1)
                 .contentTransition(.numericText(value: Double(total)))
                 .animation(Motion.settle, value: total)
             Text(total == 1 ? "thing still needs you" : "things still need you")
@@ -244,6 +245,7 @@ private struct HeroCount: View {
             Text("Across \(accounts) accounts. Tap any to open it in Gmail.")
                 .font(.system(size: 12)).foregroundStyle(Paper.ink3)
         }
+        .legibleOnGlass()
         .frame(maxWidth: .infinity).padding(.top, 22).padding(.bottom, 16)
     }
 }
@@ -264,11 +266,12 @@ private struct LoopRowView: View {
                 }
                 Text(row.loop.subject).font(.system(size: 12.5)).foregroundStyle(Paper.ink3).lineLimit(1)
             }
+            .legibleOnGlass()
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .onTapGesture { m.open(row) }
 
-            Text(relTime(row.loop.epoch)).font(.system(size: 11)).foregroundStyle(Paper.ink4)
+            Text(relTime(row.loop.epoch)).font(.system(size: 11)).foregroundStyle(Paper.ink4).legibleOnGlass()
 
             HStack(spacing: 2) {
                 RowAction(symbol: "arrowshape.turn.up.left", help: "Draft a reply") { m.openComposer(row) }
@@ -296,7 +299,7 @@ private struct RowAction: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: 13, weight: .medium))
-                .foregroundStyle(over ? Paper.accent : Paper.ink3)
+                .foregroundStyle(over ? Paper.accentSoft : Paper.ink3)
                 .frame(width: 28, height: 28)
                 .background(RoundedRectangle(cornerRadius: 7).fill(over ? Paper.accentSoft.opacity(0.16) : .clear))
                 .contentShape(Rectangle())
@@ -794,7 +797,7 @@ private struct ComposerView: View {
                 .background(Paper.sunken.opacity(0.24))
                 .overlay(alignment: .top) { Rectangle().fill(Paper.hairline.opacity(0.1)).frame(height: 0.5) }
             }
-            .background(Paper.paper.opacity(0.94))
+            .glassSurface(14, tint: Color(0, 0, 0).opacity(0.5))   // real Liquid Glass, tinted dark enough to keep text legible
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .strokeBorder(LinearGradient(colors: [Paper.hairline.opacity(0.2), Paper.hairline.opacity(0.04)],
@@ -932,7 +935,7 @@ private struct CleanupView: View {
                 .padding(12).background(Paper.sunken.opacity(0.24))
                 .overlay(alignment: .top) { Rectangle().fill(Paper.hairline.opacity(0.1)).frame(height: 0.5) }
             }
-            .background(Paper.paper.opacity(0.94))
+            .glassSurface(14, tint: Color(0, 0, 0).opacity(0.5))   // real Liquid Glass, tinted dark enough to keep text legible
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .strokeBorder(Paper.hairline.opacity(0.14), lineWidth: 0.75))
@@ -983,8 +986,8 @@ private struct ActionBar: View {
     var body: some View {
         HStack(spacing: 10) {
             Text(statusText)
-                .font(.system(size: 11.5)).foregroundStyle(m.isBusy ? Paper.accent : Paper.ink3)
-                .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                .font(.system(size: 11.5)).foregroundStyle(m.isBusy ? Paper.accentSoft : Paper.ink3)
+                .lineLimit(1).legibleOnGlass().frame(maxWidth: .infinity, alignment: .leading)
             Button { m.runKeeper() } label: {
                 HStack(spacing: 6) {
                     if m.isBusy { ProgressView().controlSize(.small).tint(.white) }
@@ -1018,7 +1021,7 @@ private struct TidyingBanner: View {
                 .phaseAnimator(reduceMotion ? [1.0] : [0.45, 1.0]) { dot, o in
                     dot.opacity(o)
                 } animation: { _ in .easeInOut(duration: 0.85) }
-            Text(message).font(.system(size: 11.5, weight: .medium)).foregroundStyle(Paper.accent)
+            Text(message).font(.system(size: 11.5, weight: .medium)).foregroundStyle(Paper.accentSoft)
                 .lineLimit(1).contentTransition(.opacity)
                 .animation(.easeInOut(duration: 0.25), value: message)
             Spacer(minLength: 0)
@@ -1084,7 +1087,7 @@ private struct SectionLabel: View {
     init(_ t: String) { text = t }
     var body: some View {
         Text(text.uppercased()).font(.system(size: 10, weight: .semibold)).kerning(0.5)
-            .foregroundStyle(Paper.ink4).padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 4)
+            .foregroundStyle(Paper.ink4).legibleOnGlass().padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 4)
     }
 }
 

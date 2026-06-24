@@ -74,9 +74,8 @@ private func seedFromBundle() -> String? {
         guard fm.fileExists(atPath: src.path) else { return }
         try? fm.copyItem(at: src, to: dst)
     }
-    // Code + templates — safe to refresh (never user data). app/panel only, so a
-    // generated app/state.json beside it survives. knowledge: only the template.
-    ["lib", "bin", "app/panel", "config.py", "config.sh", "TRIAGE.md",
+    // Code + templates — safe to refresh (never user data). knowledge: only the template.
+    ["lib", "bin", "config.py", "config.sh", "TRIAGE.md",
      "accounts.json.example", "knowledge/profile.example.md"].forEach(overwrite)
     // User-editable — seed once, then leave their edits alone.
     ["keep-policy.md", "categories.json"].forEach(seedIfMissing)

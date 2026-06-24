@@ -42,8 +42,8 @@ enum Paper {
     static let sunken      = Color(0.0, 0.0, 0.0)         // dark inset (low alpha)
     static let ink         = Color(0.97, 0.965, 0.96)     // primary text
     static let ink2        = Color(0.85, 0.845, 0.835)    // secondary — kept bright for glass
-    static let ink3        = Color(0.71, 0.705, 0.695)
-    static let ink4        = Color(0.56, 0.555, 0.545)
+    static let ink3        = Color(0.80, 0.795, 0.785)    // brightened for contrast on glass
+    static let ink4        = Color(0.70, 0.695, 0.685)    // brightened — was failing 4.5:1 even on the dark backing
     static let hairline    = Color(0.97, 0.98, 1.0)       // dividers / glass sheen — faintly cool
     static let accent      = Color(0.102, 0.451, 0.910)   // Google blue (#1A73E8)
     static let accentHi    = Color(0.259, 0.522, 0.957)   // lit top of the CTA gradient (#4285F4)
@@ -62,9 +62,16 @@ extension View {
         // A subtle dark tint by default: keeps the glass reading as glass while
         // guaranteeing a dark-enough backing so text stays legible even when
         // something bright sits behind the panel.
-        var glass: Glass = .regular.tint(tint ?? Color(0, 0, 0).opacity(0.26))
+        var glass: Glass = .regular.tint(tint ?? Color(0, 0, 0).opacity(0.50))
         if interactive { glass = glass.interactive() }
         return self.glassEffect(glass, in: .rect(cornerRadius: radius))
+    }
+
+    /// Text sitting directly on the bare panel vibrancy (no glass card under it) gets a
+    /// faint dark halo so it stays legible even when something bright bleeds through the
+    /// translucent panel — the standard text-on-glass remedy.
+    func legibleOnGlass() -> some View {
+        shadow(color: .black.opacity(0.5), radius: 1.5, y: 0.5)
     }
 }
 
