@@ -249,16 +249,17 @@ final class KeeperModel: ObservableObject {
         generateDraft(steer: steer)
     }
 
-    func sendReply() {
+    func sendReply(plain: String, html: String) {
         guard let row = composer else { return }
-        let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = plain.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { toast("Write a reply first"); return }
+        let body = html.isEmpty ? Self.textToHTML(text) : html
         composerSending = true
         Task {
             do {
                 try await api.send(slug: row.account.slug, threadId: row.loop.threadId,
                                    toEmail: composerToEmail, subject: composerSubject,
-                                   body: text, html: Self.textToHTML(text), original: composerOriginal)
+                                   body: text, html: body, original: composerOriginal)
                 if state != nil { state!.dropLoop(slug: row.account.slug, threadId: row.loop.threadId) }
                 closeComposer()
                 toast("Reply sent")

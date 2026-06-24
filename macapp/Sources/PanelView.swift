@@ -68,7 +68,7 @@ private struct TopBar: View {
             }
         }
         .padding(.horizontal, 18).padding(.top, 13).padding(.bottom, 11)
-        .background(Paper.raised.opacity(0.5))
+        .background(Paper.raised.opacity(0.26))
         .overlay(alignment: .bottom) { Rectangle().fill(Paper.hairline.opacity(0.55)).frame(height: 0.5) }
     }
 }
@@ -129,7 +129,7 @@ private struct SegmentedNav: View {
             }
         }
         .padding(3)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Paper.sunken.opacity(0.5)))
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Paper.sunken.opacity(0.34)))
         .padding(.horizontal, 14).padding(.vertical, 10)
     }
 }
@@ -301,7 +301,7 @@ private struct AccountCard: View {
             }
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Paper.raised.opacity(0.55))
+        .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Paper.raised.opacity(0.4))
             .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Paper.hairline.opacity(0.55), lineWidth: 0.5)))
     }
     private var statLine: String {
@@ -356,7 +356,7 @@ private struct UndoRow: View {
                 .buttonStyle(GhostButtonStyle()).disabled(m.isBusy)
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Paper.raised.opacity(0.55))
+        .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Paper.raised.opacity(0.4))
             .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Paper.hairline.opacity(0.55), lineWidth: 0.5)))
     }
 }
@@ -376,7 +376,7 @@ private struct PolicyView: View {
                     .scrollContentBackground(.hidden)
                     .frame(minHeight: 150)
                     .padding(8)
-                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Paper.sunken.opacity(0.5))
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Paper.sunken.opacity(0.34))
                         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Paper.hairline.opacity(0.6), lineWidth: 0.5)))
 
                 let learned = (m.state?.learned ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -427,6 +427,7 @@ private struct MarkdownLite: View {
 
 private struct ComposerView: View {
     @EnvironmentObject var m: KeeperModel
+    @StateObject private var rich = RichTextController()
     var body: some View {
         VStack(spacing: 0) {
             Spacer(minLength: 40)
@@ -441,7 +442,7 @@ private struct ComposerView: View {
                         .buttonStyle(.plain).foregroundStyle(Paper.ink3).accessibilityLabel("Close")
                 }
                 .padding(14)
-                .background(Paper.sunken.opacity(0.5))
+                .background(Paper.sunken.opacity(0.34))
                 .overlay(alignment: .bottom) { Rectangle().fill(Paper.hairline.opacity(0.5)).frame(height: 0.5) }
 
                 if m.composerLoading {
@@ -449,18 +450,17 @@ private struct ComposerView: View {
                         ProgressView().controlSize(.small)
                         Text("Drafting in your voice…").font(.system(size: 12.5)).foregroundStyle(Paper.ink3)
                     }
-                    .frame(maxWidth: .infinity, minHeight: 150)
+                    .frame(maxWidth: .infinity, minHeight: 178)
                 } else {
-                    TextEditor(text: $m.composerText)
-                        .font(.system(size: 13))
-                        .scrollContentBackground(.hidden)
+                    FormatBar(rich: rich)
+                    RichTextEditor(controller: rich, initialText: m.composerText)
                         .frame(minHeight: 150)
-                        .padding(10)
+                        .padding(.horizontal, 8).padding(.bottom, 4)
                     HStack(spacing: 8) {
                         TextField("Adjust the draft (e.g. shorter, warmer, decline politely)", text: $m.composerSteer)
                             .textFieldStyle(.plain).font(.system(size: 12))
                             .padding(.horizontal, 10).frame(height: 30)
-                            .background(RoundedRectangle(cornerRadius: 8).fill(Paper.sunken.opacity(0.5)))
+                            .background(RoundedRectangle(cornerRadius: 8).fill(Paper.sunken.opacity(0.34)))
                         Button { m.regenerate() } label: { Image(systemName: "arrow.clockwise") }
                             .buttonStyle(GhostButtonStyle()).accessibilityLabel("Regenerate draft")
                     }
@@ -469,7 +469,7 @@ private struct ComposerView: View {
 
                 HStack {
                     Spacer()
-                    Button { m.sendReply() } label: {
+                    Button { m.sendReply(plain: rich.plainText(), html: rich.html()) } label: {
                         HStack(spacing: 6) {
                             if m.composerSending { ProgressView().controlSize(.small).tint(.white) }
                             Text(m.composerSending ? "Sending…" : "Send reply")
@@ -478,14 +478,39 @@ private struct ComposerView: View {
                     .buttonStyle(PrimaryButtonStyle()).disabled(m.composerLoading || m.composerSending)
                 }
                 .padding(12)
-                .background(Paper.sunken.opacity(0.5))
+                .background(Paper.sunken.opacity(0.34))
                 .overlay(alignment: .top) { Rectangle().fill(Paper.hairline.opacity(0.5)).frame(height: 0.5) }
             }
-            .background(Paper.paper.opacity(0.82))
+            .background(Paper.paper.opacity(0.9))
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .shadow(color: .black.opacity(0.18), radius: 22, y: 8)
             .padding(10)
         }
+    }
+}
+
+// Formatting toolbar that drives the rich-text editor. mousedown-style buttons keep
+// the editor's selection while applying the format.
+private struct FormatBar: View {
+    @ObservedObject var rich: RichTextController
+    var body: some View {
+        HStack(spacing: 4) {
+            fmt({ Text("B").font(.system(size: 13, weight: .bold)) }, "Bold") { rich.toggleBold() }
+            fmt({ Text("I").font(.system(size: 13, weight: .medium)).italic() }, "Italic") { rich.toggleItalic() }
+            fmt({ Image(systemName: "list.bullet").font(.system(size: 12)) }, "Bulleted list") { rich.toggleBullet() }
+            fmt({ Image(systemName: "link").font(.system(size: 12)) }, "Add link") { rich.addLink() }
+            Spacer()
+        }
+        .foregroundStyle(Paper.ink2)
+        .padding(.horizontal, 12).padding(.top, 8)
+    }
+    private func fmt<L: View>(@ViewBuilder _ label: () -> L, _ a11y: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            label().frame(width: 28, height: 26)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Paper.sunken.opacity(0.4)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).accessibilityLabel(a11y)
     }
 }
 
@@ -513,7 +538,7 @@ private struct ActionBar: View {
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
-        .background(Paper.raised.opacity(0.5))
+        .background(Paper.raised.opacity(0.26))
         .overlay(alignment: .top) { Rectangle().fill(Paper.hairline.opacity(0.55)).frame(height: 0.5) }
     }
     private var statusText: String {
