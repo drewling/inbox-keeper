@@ -33,6 +33,11 @@ struct PanelView: View {
                 ComposerView()
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+
+            if m.cleanup != nil {
+                CleanupView()
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .frame(width: PANEL_W, height: PANEL_H)
         .background(
@@ -53,6 +58,7 @@ struct PanelView: View {
         .environment(\.colorScheme, .dark)
         .animation(.easeOut(duration: 0.22), value: m.toastInfo)
         .animation(.snappy(duration: 0.28), value: m.composer?.id)
+        .animation(.snappy(duration: 0.28), value: m.cleanup?.slug)
     }
 }
 
@@ -327,6 +333,7 @@ private struct AccountsView: View {
 }
 
 private struct AccountCard: View {
+    @EnvironmentObject var m: KeeperModel
     let account: Account
     var body: some View {
         HStack(spacing: 12) {
@@ -341,6 +348,15 @@ private struct AccountCard: View {
                 Text(account.ok ? "\(account.inboxThreads)" : "—").font(.system(size: 17, weight: .bold))
                 Text("open").font(.system(size: 10)).foregroundStyle(Paper.ink4)
             }
+            Menu {
+                Button { m.openCleanup(account) } label: { Label("Clean up labels…", systemImage: "tag.slash") }
+            } label: {
+                Image(systemName: "ellipsis").font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Paper.ink3).frame(width: 22, height: 24).contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .disabled(!account.ok)
+            .help("Account actions")
         }
         .padding(12)
         .glassSurface(12)
@@ -743,6 +759,127 @@ private struct FormatBar: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain).accessibilityLabel(a11y)
+    }
+}
+
+// MARK: - Label cleanup
+
+private struct CleanupView: View {
+    @EnvironmentObject var m: KeeperModel
+    @State private var confirming = false
+    private var c: CleanupState? { m.cleanup }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 26)
+            VStack(spacing: 0) {
+                // Header
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Clean up labels").font(.system(size: 13, weight: .semibold))
+                        Text(c?.email ?? "").font(.system(size: 11.5)).foregroundStyle(Paper.ink3).lineLimit(1)
+                    }
+                    Spacer()
+                    Button { m.closeCleanup() } label: { Image(systemName: "xmark").font(.system(size: 13, weight: .medium)) }
+                        .buttonStyle(.plain).foregroundStyle(Paper.ink3).accessibilityLabel("Close")
+                }
+                .padding(14).background(Paper.sunken.opacity(0.24))
+                .overlay(alignment: .bottom) { Rectangle().fill(Paper.hairline.opacity(0.1)).frame(height: 0.5) }
+
+                // Body
+                if c?.loading == true {
+                    VStack(spacing: 10) {
+                        ProgressView().controlSize(.small)
+                        Text("Reading labels…").font(.system(size: 12.5)).foregroundStyle(Paper.ink3)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 220)
+                } else if let err = c?.error {
+                    EmptyState(symbol: "exclamationmark.triangle", warn: true,
+                               title: "Couldn’t read labels", message: err).frame(minHeight: 220)
+                } else if c?.labels.isEmpty ?? true {
+                    EmptyState(symbol: "tag", warn: false, title: "No custom labels",
+                               message: "This account only has Gmail’s built-in labels — nothing to clean up.")
+                        .frame(minHeight: 220)
+                } else {
+                    let total = c!.labels.count, sel = c!.selected.count
+                    HStack {
+                        Text("\(sel) of \(total) selected").font(.system(size: 11.5)).foregroundStyle(Paper.ink3)
+                        Spacer()
+                        Button(sel == total ? "Select none" : "Select all") { m.setAllCleanup(sel != total) }
+                            .buttonStyle(.plain).font(.system(size: 11.5, weight: .medium)).foregroundStyle(Paper.accentSoft)
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    ScrollView {
+                        LazyVStack(spacing: 6) {
+                            ForEach(c!.labels) { label in
+                                LabelCleanRow(label: label, selected: c!.selected.contains(label.id)) {
+                                    m.toggleCleanup(label.id)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 12).padding(.bottom, 12)
+                    }
+                    .frame(maxHeight: 300)
+                }
+
+                // Footer
+                HStack(spacing: 9) {
+                    Image(systemName: "checkmark.shield").font(.system(size: 11)).foregroundStyle(Paper.clear)
+                    Text("Deleting a label never deletes mail.").font(.system(size: 11)).foregroundStyle(Paper.ink4)
+                    Spacer(minLength: 6)
+                    Button { confirming = true } label: {
+                        HStack(spacing: 6) {
+                            if c?.deleting == true { ProgressView().controlSize(.small).tint(.white) }
+                            Text("Delete \(c?.selected.count ?? 0)")
+                        }
+                    }
+                    .buttonStyle(DangerButtonStyle(enabled: (c?.selected.isEmpty == false) && c?.deleting != true))
+                    .disabled((c?.selected.isEmpty ?? true) || c?.deleting == true)
+                }
+                .padding(12).background(Paper.sunken.opacity(0.24))
+                .overlay(alignment: .top) { Rectangle().fill(Paper.hairline.opacity(0.1)).frame(height: 0.5) }
+            }
+            .background(Paper.paper.opacity(0.94))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Paper.hairline.opacity(0.14), lineWidth: 0.75))
+            .shadow(color: .black.opacity(0.32), radius: 24, y: 10)
+            .padding(10)
+        }
+        .confirmationDialog("Delete \(c?.selected.count ?? 0) label\((c?.selected.count ?? 0) == 1 ? "" : "s")?",
+                            isPresented: $confirming, titleVisibility: .visible) {
+            Button("Delete labels", role: .destructive) { m.deleteCleanupSelected() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Removes the labels from this account. Your mail isn’t deleted — threads stay in All Mail.")
+        }
+    }
+}
+
+private struct LabelCleanRow: View {
+    let label: LabelInfo
+    let selected: Bool
+    let toggle: () -> Void
+    var body: some View {
+        Button(action: toggle) {
+            HStack(spacing: 10) {
+                Image(systemName: selected ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 14)).foregroundStyle(selected ? Paper.accent : Paper.ink4)
+                Text(label.name).font(.system(size: 12.5)).foregroundStyle(Paper.ink).lineLimit(1)
+                if label.ours {
+                    Text("app").font(.system(size: 9, weight: .semibold)).foregroundStyle(Paper.accentSoft)
+                        .padding(.horizontal, 5).padding(.vertical, 1.5)
+                        .background(Capsule().fill(Paper.accentSoft.opacity(0.16)))
+                }
+                Spacer(minLength: 6)
+                Text("\(label.threads)").font(.system(size: 11)).foregroundStyle(Paper.ink4).monospacedDigit()
+            }
+            .padding(.vertical, 8).padding(.horizontal, 11)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(selected ? Paper.accentSoft.opacity(0.10) : Paper.raised.opacity(0.04)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

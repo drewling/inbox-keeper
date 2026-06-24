@@ -204,6 +204,24 @@ struct Job: Decodable {
     }
 }
 
+// One Gmail label in the per-account cleanup sheet. `ours` marks labels inbox-keeper
+// created (recovery points, category tags, legacy taxonomy) so they can be pre-checked.
+struct LabelInfo: Decodable, Identifiable {
+    var id = ""
+    var name = ""
+    var threads = 0
+    var ours = false
+
+    enum K: String, CodingKey { case id, name, threads, ours }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: K.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? ""
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        threads = try c.decodeIfPresent(Int.self, forKey: .threads) ?? 0
+        ours = try c.decodeIfPresent(Bool.self, forKey: .ours) ?? false
+    }
+}
+
 // A loop flattened with its owning account, for the unified "waiting on you" list.
 struct LoopRow: Identifiable {
     let loop: Loop
@@ -303,6 +321,27 @@ struct KeeperAPI {
     /// Delete a learned preference and suppress it so it's never re-learned.
     func rejectLearned(_ text: String) async throws {
         _ = try await sendJSON("/api/learned/reject", method: "POST", body: ["text": text])
+    }
+
+    // MARK: label cleanup
+
+    /// Every user label on an account, with thread counts; `ours` flags app-made ones.
+    func labels(slug: String) async throws -> [LabelInfo] {
+        struct Wrap: Decodable { var labels: [LabelInfo] = []; var error: String? }
+        var comps = URLComponents(url: base.appendingPathComponent("/api/labels"),
+                                  resolvingAgainstBaseURL: false)!
+        comps.queryItems = [URLQueryItem(name: "slug", value: slug)]
+        var req = URLRequest(url: comps.url!); req.timeoutInterval = 30
+        let data = try await fetch(req)
+        guard let w = try? Self.decoder.decode(Wrap.self, from: data) else { throw KeeperError.badData }
+        return w.labels
+    }
+
+    /// Delete the given labels. Returns (deleted, failed). Mail is never deleted.
+    @discardableResult
+    func deleteLabels(slug: String, ids: [String]) async throws -> (deleted: Int, failed: Int) {
+        let r = try await postRaw("/api/labels/delete", ["slug": slug, "ids": ids], timeout: 60)
+        return ((r["deleted"] as? Int) ?? 0, (r["failed"] as? [Any])?.count ?? 0)
     }
 
     // MARK: - plumbing

@@ -7,14 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- Per-account label cleanup: review and delete labels in bulk (mail is never deleted).
-
 ## [1.1.0] - 2026-06-24
 
 ### Added
 
+- Per-account label cleanup: review an account's labels in a checklist (app-created ones pre-selected) and bulk-delete the ones you don't want. Mail is never deleted — labels only.
 - Real Gmail profile photos displayed as circular avatars throughout the panel.
 - Editable categories applied as Gmail labels and surfaced as loop tags in the panel.
 - Categories editor in Settings for managing per-account category sets.

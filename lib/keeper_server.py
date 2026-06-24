@@ -18,8 +18,9 @@ Only one background job runs at a time (keeper operations touch Gmail and should
 not overlap). The panel polls /api/job while one is active.
 """
 import json, os, subprocess, sys, threading, time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -290,6 +291,152 @@ def _acct(slug):
     if not a:
         raise ValueError(f"unknown account {slug!r}")
     return a
+
+
+# ---------------------------------------------------------------------------
+# Label clean-up helpers
+# ---------------------------------------------------------------------------
+
+# Gmail system label ids that must never be deleted. The type=="system" check
+# covers all current ones, but we also enumerate known ids defensively.
+_GMAIL_SYSTEM_IDS = frozenset({
+    "INBOX", "SENT", "TRASH", "SPAM", "DRAFT", "DRAFTS", "CHAT",
+    "STARRED", "IMPORTANT", "UNREAD",
+    "CATEGORY_PERSONAL", "CATEGORY_SOCIAL", "CATEGORY_PROMOTIONS",
+    "CATEGORY_UPDATES", "CATEGORY_FORUMS",
+})
+
+# Legacy unified-taxonomy labels created by earlier inbox-keeper versions
+# (before per-user categories were introduced). Source: TRIAGE.md + demote_automated.py.
+_LEGACY_LABELS = frozenset({
+    "⚡ Action",
+    "📬 FYI",
+    "🔻 Low",
+    "💰 Finance",
+    "🤝 Clients",
+    "📅 Meetings",
+    "🔔 Services",
+})
+
+
+def _is_ours(name, category_label_names, label_history):
+    """Return True if a label was created by inbox-keeper."""
+    import inbox_zero as iz  # noqa: E402
+    if name.startswith(iz._BASE_LABEL):
+        return True
+    if name in category_label_names:
+        return True
+    if name in label_history:
+        return True
+    if name in _LEGACY_LABELS:
+        return True
+    return False
+
+
+def _fetch_label_detail(cfg, label):
+    """Fetch threadsTotal for a single user label. Returns (label, threads_int)."""
+    import draftutil as du  # noqa: E402
+    try:
+        detail = du._gws(cfg, ["gmail", "users", "labels", "get",
+                               "--params", json.dumps({"userId": "me", "id": label["id"]})])
+        threads = int(detail.get("threadsTotal", 0) or 0)
+    except Exception:
+        threads = 0
+    return label, threads
+
+
+def _list_account_labels(slug):
+    """Return {"labels": [...]} or {"labels": [], "error": "..."} for one account."""
+    sys.path.insert(0, HERE)
+    import draftutil as du            # noqa: E402
+    import review_open_loops as rol   # noqa: E402
+
+    try:
+        cfg = _acct(slug)["config_dir"]
+    except ValueError as exc:
+        return {"labels": [], "error": str(exc)}
+
+    try:
+        data = du._gws(cfg, ["gmail", "users", "labels", "list",
+                              "--params", json.dumps({"userId": "me"})])
+    except Exception as exc:
+        return {"labels": [], "error": str(exc)}
+
+    # Build the "ours" detection set from current categories + persisted history.
+    try:
+        cats = rol._categories()
+        category_label_names = {rol._category_label_name(c) for c in cats}
+    except Exception:
+        category_label_names = set()
+
+    try:
+        label_history = rol._load_label_history()
+    except Exception:
+        label_history = set()
+
+    # Filter to user-created labels only (exclude type=="system").
+    user_labels = [l for l in (data.get("labels") or [])
+                   if l.get("type") != "system"
+                   and l.get("id") not in _GMAIL_SYSTEM_IDS]
+
+    # Fetch threadsTotal in parallel (cap 8 workers, matching dashboard_state).
+    results = []
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futs = {ex.submit(_fetch_label_detail, cfg, lab): lab for lab in user_labels}
+        for f in as_completed(futs):
+            try:
+                lab, threads = f.result()
+                ours = _is_ours(lab.get("name", ""), category_label_names, label_history)
+                results.append({
+                    "id": lab["id"],
+                    "name": lab.get("name", ""),
+                    "threads": threads,
+                    "ours": ours,
+                })
+            except Exception:
+                pass
+
+    # Sort: ours-first, then name A→Z.
+    results.sort(key=lambda r: (not r["ours"], r["name"]))
+    return {"labels": results}
+
+
+def _delete_account_labels(slug, ids):
+    """Delete user labels by id. Returns {ok, deleted, failed}."""
+    sys.path.insert(0, HERE)
+    import draftutil as du  # noqa: E402
+
+    cfg = _acct(slug)["config_dir"]
+
+    # Re-fetch the live label list to verify each id is user-type (never system).
+    try:
+        data = du._gws(cfg, ["gmail", "users", "labels", "list",
+                              "--params", json.dumps({"userId": "me"})])
+    except Exception as exc:
+        raise RuntimeError(f"could not list labels: {exc}")
+
+    id_to_label = {l["id"]: l for l in (data.get("labels") or [])}
+
+    deleted = 0
+    failed = []
+    for lid in ids:
+        lab = id_to_label.get(lid)
+        if lab is None:
+            failed.append({"id": lid, "error": "label not found on this account"})
+            continue
+        # Refuse system labels — belt + braces: check both type and known id set.
+        if lab.get("type") == "system" or lid in _GMAIL_SYSTEM_IDS:
+            failed.append({"id": lid, "error": "refusing to delete Gmail system label"})
+            continue
+        try:
+            du._gws(cfg, ["gmail", "users", "labels", "delete",
+                          "--params", json.dumps({"userId": "me", "id": lid})],
+                    allow_empty=True)
+            deleted += 1
+        except Exception as exc:
+            failed.append({"id": lid, "error": str(exc)})
+
+    return {"ok": True, "deleted": deleted, "failed": failed}
 
 
 def _name_from_email(email):
@@ -695,7 +842,17 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, data, _ASSET_TYPES.get(ext, "application/octet-stream"))
 
     def do_GET(self):
-        p = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        p = parsed.path
+        if p == "/api/labels":
+            qs = parse_qs(parsed.query)
+            slug = (qs.get("slug") or [None])[0]
+            if not slug:
+                return self._send(400, {"error": "slug is required"})
+            try:
+                return self._send(200, _list_account_labels(slug))
+            except Exception as exc:
+                return self._send(500, {"error": str(exc)})
         if p == "/api/state":
             if os.path.isfile(STATE_PATH):
                 with open(STATE_PATH, "rb") as f:
@@ -732,6 +889,24 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 return self._send(500, {"error": str(exc)})
             return self._send(200, {"ok": True})
+
+        if p == "/api/labels/delete":
+            slug = payload.get("slug")
+            ids = payload.get("ids")
+            if not slug:
+                return self._send(400, {"error": "slug is required"})
+            if not isinstance(ids, list) or not ids:
+                return self._send(400, {"error": "ids must be a non-empty list"})
+            if not all(isinstance(i, str) for i in ids):
+                return self._send(400, {"error": "ids must be a list of strings"})
+            try:
+                _acct(slug)  # validate slug maps to a known account
+            except ValueError as exc:
+                return self._send(400, {"error": str(exc)})
+            try:
+                return self._send(200, _delete_account_labels(slug, ids))
+            except Exception as exc:
+                return self._send(500, {"error": str(exc)})
 
         # Fast synchronous endpoints (one thread / one model call), not the job slot.
         _sync = {"/api/dismiss": _dismiss, "/api/draft": _gen_draft,

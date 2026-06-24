@@ -28,6 +28,17 @@ struct ToastInfo: Identifiable, Equatable {
     static func == (a: ToastInfo, b: ToastInfo) -> Bool { a.id == b.id }
 }
 
+// Per-account label-cleanup sheet state.
+struct CleanupState {
+    let slug: String
+    let email: String
+    var labels: [LabelInfo] = []
+    var selected: Set<String> = []   // selected label ids
+    var loading = true
+    var deleting = false
+    var error: String?
+}
+
 @MainActor
 final class KeeperModel: ObservableObject {
     @Published var state: AppState?
@@ -39,6 +50,9 @@ final class KeeperModel: ObservableObject {
     // clobbered by background reloads. state.categories stays the source for tags.
     @Published var categoriesDraft: [Category] = []
     @Published var categoriesSaving = false
+
+    // Label cleanup sheet (one account at a time).
+    @Published var cleanup: CleanupState?
 
     // Composer (one reply at a time).
     @Published var composer: LoopRow?
@@ -297,6 +311,64 @@ final class KeeperModel: ObservableObject {
                 toast("Categories saved — applied on the next run")
             } catch {
                 toast("Couldn’t save categories")
+            }
+        }
+    }
+
+    // MARK: label cleanup
+
+    func openCleanup(_ a: Account) {
+        cleanup = CleanupState(slug: a.slug, email: a.email)
+        loadCleanupLabels()
+    }
+    func closeCleanup() { cleanup = nil }
+
+    func loadCleanupLabels() {
+        guard let slug = cleanup?.slug else { return }
+        cleanup?.loading = true; cleanup?.error = nil
+        Task {
+            do {
+                let labels = try await api.labels(slug: slug)
+                guard cleanup?.slug == slug else { return }
+                cleanup?.labels = labels
+                cleanup?.selected = Set(labels.filter(\.ours).map(\.id))   // pre-check app-made labels
+                cleanup?.loading = false
+            } catch {
+                guard cleanup?.slug == slug else { return }
+                cleanup?.loading = false; cleanup?.error = "Couldn’t load labels"
+            }
+        }
+    }
+
+    func toggleCleanup(_ id: String) {
+        guard cleanup != nil else { return }
+        if cleanup!.selected.contains(id) { cleanup!.selected.remove(id) } else { cleanup!.selected.insert(id) }
+    }
+    func setAllCleanup(_ on: Bool) {
+        guard cleanup != nil else { return }
+        cleanup!.selected = on ? Set(cleanup!.labels.map(\.id)) : []
+    }
+
+    /// Delete the selected labels. Reversible-safe: this removes labels only, never
+    /// mail. Refreshes the sheet + state afterwards (counts/undo points can shift).
+    func deleteCleanupSelected() {
+        guard let c = cleanup, !c.selected.isEmpty, !c.deleting else { return }
+        let slug = c.slug, ids = Array(c.selected)
+        cleanup?.deleting = true
+        Task {
+            defer { cleanup?.deleting = false }
+            do {
+                let r = try await api.deleteLabels(slug: slug, ids: ids)
+                Haptic.tap()
+                if cleanup?.slug == slug, let labels = try? await api.labels(slug: slug) {
+                    cleanup?.labels = labels
+                    cleanup?.selected = Set(labels.filter(\.ours).map(\.id))
+                }
+                await reload()
+                toast(r.failed == 0 ? "Removed \(r.deleted) label\(r.deleted == 1 ? "" : "s")"
+                                    : "Removed \(r.deleted), \(r.failed) failed")
+            } catch {
+                toast("Couldn’t delete labels")
             }
         }
     }

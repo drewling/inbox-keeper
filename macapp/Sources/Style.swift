@@ -126,6 +126,24 @@ struct GhostButtonStyle: ButtonStyle {
     }
 }
 
+// Destructive confirm action (label cleanup). Same liquid press as the primary CTA,
+// in the error red so deletion never wears the brand's go-ahead colour.
+struct DangerButtonStyle: ButtonStyle {
+    var enabled: Bool = true
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+            .padding(.horizontal, 14).frame(height: 32)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(configuration.isPressed ? Paper.danger.opacity(0.82) : Paper.danger)
+                .shadow(color: Paper.danger.opacity(configuration.isPressed ? 0 : 0.3), radius: 7, y: 2))
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .opacity(enabled ? 1 : 0.45)
+            .animation(.spring(response: 0.26, dampingFraction: 0.62), value: configuration.isPressed)
+            .contentShape(Rectangle())
+    }
+}
+
 // The one account mark, used in rows, cards, and the top strip: a circular avatar
 // showing the real Gmail profile photo when we have one, falling back to a coloured
 // initials circle while it loads or if the account has no photo.
