@@ -783,6 +783,68 @@ def _add_account(payload):
                 shutil.rmtree(created_dir, ignore_errors=True)
 
 
+def _credentials_status():
+    """Whether a Google OAuth client is already configured and whether any account
+    is connected — lets onboarding skip the credential step when it isn't needed."""
+    gws_root = os.path.join(os.path.expanduser("~"), ".config", "gws")
+    has_client = os.path.isfile(os.path.join(gws_root, "client_secret.json"))
+    if not has_client:  # gws also accepts the client from env vars instead of the file
+        has_client = bool(os.environ.get("GOOGLE_WORKSPACE_CLI_CLIENT_ID")
+                          and os.environ.get("GOOGLE_WORKSPACE_CLI_CLIENT_SECRET"))
+    return {"has_client": has_client, "has_accounts": bool(_load_accounts())}
+
+
+def _set_client_credentials(payload):
+    """Write the user's Google OAuth *client* credentials to
+    ~/.config/gws/client_secret.json so gws can run the browser sign-in without the
+    user hand-placing a file. Accepts either the pasted Google JSON ({"json": "..."})
+    or raw {client_id, client_secret}. This is the OAuth *app* identity (not truly
+    secret for a Desktop client, and never a user password) — gws still does the
+    consent in the browser."""
+    gws_root = os.path.join(os.path.expanduser("~"), ".config", "gws")
+    os.makedirs(gws_root, exist_ok=True)
+    dst = os.path.join(gws_root, "client_secret.json")
+
+    raw = payload.get("json")
+    if isinstance(raw, str) and raw.strip():
+        try:
+            data = json.loads(raw)
+        except Exception:
+            raise RuntimeError("That doesn't look like valid JSON. Paste the whole "
+                               "client_secret file you downloaded from Google.")
+        inner = data.get("installed") or data.get("web") or {}
+        cid = str(inner.get("client_id", "")).strip()
+        csec = str(inner.get("client_secret", "")).strip()
+        if not cid or not csec:
+            raise RuntimeError("That JSON is missing client_id / client_secret — make "
+                               "sure it's the OAuth client file for a Desktop app.")
+        out = data  # preserve auth_uri/token_uri/redirect_uris exactly as Google gave them
+    else:
+        cid = str(payload.get("client_id", "")).strip()
+        csec = str(payload.get("client_secret", "")).strip()
+        if not cid or not csec:
+            raise RuntimeError("Both Client ID and Client Secret are required.")
+        out = {"installed": {
+            "client_id": cid,
+            "client_secret": csec,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "redirect_uris": ["http://localhost"],
+        }}
+
+    if ".apps.googleusercontent.com" not in cid:
+        raise RuntimeError("That Client ID doesn't look right — it should end with "
+                           "'.apps.googleusercontent.com'. Double-check the paste.")
+
+    tmp = dst + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(out, f, indent=2)
+    os.chmod(tmp, 0o600)  # contains the OAuth client secret
+    os.replace(tmp, dst)
+    return {"ok": True, "path": dst}
+
+
 sys.path.insert(0, HERE)
 from dashboard_state import _DEFAULT_CATEGORIES  # noqa: E402 — canonical definition lives there
 
@@ -932,6 +994,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"categories": _read_categories()})
         if p == "/api/settings":
             return self._send(200, _read_settings())
+        if p == "/api/credentials-status":
+            return self._send(200, _credentials_status())
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -995,7 +1059,8 @@ class Handler(BaseHTTPRequestHandler):
 
         # Fast synchronous endpoints (one thread / one model call), not the job slot.
         _sync = {"/api/dismiss": _dismiss, "/api/draft": _gen_draft,
-                 "/api/draft/send": _send_draft}
+                 "/api/draft/send": _send_draft,
+                 "/api/set-credentials": _set_client_credentials}
         if p in _sync:
             try:
                 return self._send(200, _sync[p](payload))
