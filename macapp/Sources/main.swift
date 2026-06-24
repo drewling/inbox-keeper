@@ -1,25 +1,20 @@
-// inbox-keeper — macOS menu-bar shell.
+// inbox-keeper — macOS menu-bar app.
 //
-// Lives in the menu bar (no Dock icon). Shows the web panel in a borderless
-// floating window with a native "Liquid Glass" surface: a real
-// NSVisualEffectView vibrancy material, masked to a rounded bubble with an arrow
-// pointing up at the menu-bar item, with a transparent WKWebView on top so the
-// glass shows through the panel's translucent surfaces. No hand-tinted bitmap —
-// the material is the surface, the window shadow defines the edge. The content
-// (ink text on a light frost) is always legible, so it can never read as blank.
-// Starts the local panel server on launch, kills it on quit.
+// Lives in the menu bar (no Dock icon). The panel is fully native SwiftUI hosted
+// inside a real macOS 26 "Liquid Glass" surface (NSGlassEffectView) — not a web
+// view, and not a hand-painted bitmap. The AppKit shell owns the status item, the
+// borderless floating panel, and the local keeper server's lifecycle. A single
+// long-lived KeeperModel backs the UI, so closing and reopening the panel never
+// loses an in-progress run: it re-attaches to the live server-side job on open.
 
 import AppKit
-import WebKit
+import SwiftUI
 
 let PORT = ProcessInfo.processInfo.environment["KEEPER_PORT"] ?? "8765"
-let PANEL_URL = URL(string: "http://127.0.0.1:\(PORT)/?app=1")!
 let PANEL_W: CGFloat = 420
 let PANEL_H: CGFloat = 640
-let ARROW_H: CGFloat = 9
-let ARROW_W: CGFloat = 22
-let CORNER: CGFloat = 13
-let GAP: CGFloat = 1            // arrow tip to the menu bar
+let CORNER: CGFloat = 18        // modern macOS-26 menu-surface radius (arrowless)
+let GAP: CGFloat = 6            // panel top to the menu bar
 
 func resolveRepoRoot() -> String? {
     let fm = FileManager.default
@@ -50,91 +45,67 @@ func augmentedPath() -> String {
     return parts.joined(separator: ":")
 }
 
-// The glass bubble + upward arrow. A native NSVisualEffectView fills the view and
-// is masked to the bubble silhouette, so the live vibrancy material (and the
-// window shadow that follows it) takes the bubble + arrow shape. The web content
-// sits on top in a transparent web view.
-final class BubbleView: NSView {
-    let effect = NSVisualEffectView()
-    var arrowX: CGFloat = PANEL_W - 40 { didSet { if oldValue != arrowX { applyMask() } } }
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        wantsLayer = true
-        effect.material = .popover          // the macOS "Liquid Glass" popover material
-        effect.blendingMode = .behindWindow
-        effect.state = .active
-        // Keep the glass light to match the panel's light-only design, even in dark mode.
-        effect.appearance = NSAppearance(named: .aqua)
-        effect.frame = bounds
-        effect.autoresizingMask = [.width, .height]
-        addSubview(effect)
-        applyMask()
-    }
-    required init?(coder: NSCoder) { fatalError("init(coder:) unused") }
-
-    private func bubblePath() -> NSBezierPath {
-        let bodyTop = bounds.height - ARROW_H
-        let body = NSRect(x: 0, y: 0, width: bounds.width, height: bodyTop)
-        let path = NSBezierPath(roundedRect: body, xRadius: CORNER, yRadius: CORNER)
-        let tri = NSBezierPath()
-        tri.move(to: NSPoint(x: arrowX - ARROW_W / 2, y: bodyTop - 0.5))
-        tri.line(to: NSPoint(x: arrowX, y: bounds.height))
-        tri.line(to: NSPoint(x: arrowX + ARROW_W / 2, y: bodyTop - 0.5))
-        tri.close()
-        path.append(tri)
-        return path
-    }
-
-    // Re-mask at the new scale when moving between displays of different density.
-    override func viewDidChangeBackingProperties() {
-        super.viewDidChangeBackingProperties()
-        applyMask()
-    }
-
-    // Mask the vibrancy material to the bubble shape. Rasterized at the display's
-    // backing scale so the rounded corners, the arrow, and the shadow edge that
-    // follows them stay crisp on Retina.
-    private func applyMask() {
-        guard bounds.width > 0, bounds.height > 0 else { return }
-        let scale = window?.backingScaleFactor ?? 2
-        let pw = Int((bounds.width * scale).rounded())
-        let ph = Int((bounds.height * scale).rounded())
-        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pw, pixelsHigh: ph,
-                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return }
-        rep.size = bounds.size   // points; the context scales point-space drawing up to pixels
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-        NSColor.black.setFill()
-        bubblePath().fill()
-        NSGraphicsContext.restoreGraphicsState()
-        let img = NSImage(size: bounds.size)
-        img.addRepresentation(rep)
-        effect.maskImage = img
-    }
-}
-
 final class KeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
-final class AppController: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate {
+@MainActor
+final class AppController: NSObject, NSApplicationDelegate {
     let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    let model = KeeperModel(port: PORT)
     var panel: KeyablePanel!
-    var bubble: BubbleView!
     var server: Process?
-    var webView: WKWebView!
-    var loadRetries = 0
     var repoMissing = false
     var clickMonitor: Any?
     var escMonitor: Any?
 
     func applicationDidFinishLaunching(_ note: Notification) {
-        NSApp.setActivationPolicy(.accessory)
         startServer()
+        // Dev-only: KEEPER_PREVIEW renders the panel in a normal window for a
+        // screenshot of the live glass material (the menu-bar popover is hidden
+        // until clicked and can't be captured headlessly).
+        if ProcessInfo.processInfo.environment["KEEPER_PREVIEW"] != nil {
+            NSApp.setActivationPolicy(.regular)
+            let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: PANEL_W, height: PANEL_H),
+                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            win.title = "inbox-keeper preview"
+            win.isOpaque = false
+            win.backgroundColor = .clear
+            win.contentView = makeGlassContent()
+            if let vf = NSScreen.main?.visibleFrame {
+                win.setFrameTopLeftPoint(NSPoint(x: vf.minX + 80, y: vf.maxY - 80))
+            }
+            win.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            if let t = ProcessInfo.processInfo.environment["KEEPER_TAB"], let tab = Tab(rawValue: t) {
+                model.tab = tab
+            }
+            model.onPanelOpen()
+            return
+        }
+        NSApp.setActivationPolicy(.accessory)
         setupStatusItem()
         setupPanel()
+    }
+
+    /// Build the real Liquid Glass surface hosting the SwiftUI panel. Shared by the
+    /// menu-bar panel and the preview window.
+    func makeGlassContent() -> NSGlassEffectView {
+        let content = NSRect(x: 0, y: 0, width: PANEL_W, height: PANEL_H)
+        let hosting = NSHostingView(rootView: PanelView().environmentObject(model))
+        hosting.frame = content
+        hosting.wantsLayer = true
+        hosting.layer?.backgroundColor = .clear
+        hosting.layer?.cornerRadius = CORNER          // clip content to the glass silhouette
+        hosting.layer?.masksToBounds = true
+        hosting.appearance = NSAppearance(named: .aqua)
+
+        let glass = NSGlassEffectView(frame: content)
+        glass.cornerRadius = CORNER
+        glass.tintColor = NSColor(srgbRed: 0.97, green: 0.94, blue: 0.89, alpha: 0.42)
+        glass.contentView = hosting
+        glass.appearance = NSAppearance(named: .aqua)
+        return glass
     }
 
     func setupStatusItem() {
@@ -148,23 +119,14 @@ final class AppController: NSObject, NSApplicationDelegate, WKNavigationDelegate
     }
 
     func setupPanel() {
-        let total = NSRect(x: 0, y: 0, width: PANEL_W, height: PANEL_H + ARROW_H)
-        bubble = BubbleView(frame: total)
+        let content = NSRect(x: 0, y: 0, width: PANEL_W, height: PANEL_H)
+        // The real Liquid Glass material. Regular style, a whisper of warm tint to
+        // keep the brand's paper character; the rounded corners and the window
+        // shadow that follows them define the floating surface — no arrow, matching
+        // modern macOS menu surfaces.
+        let glass = makeGlassContent()
 
-        let cfg = WKWebViewConfiguration()
-        webView = WKWebView(frame: NSRect(x: 0, y: 0, width: PANEL_W, height: PANEL_H),
-                            configuration: cfg)
-        webView.navigationDelegate = self
-        webView.uiDelegate = self
-        webView.wantsLayer = true
-        webView.layer?.cornerRadius = CORNER
-        webView.layer?.masksToBounds = true
-        webView.layer?.backgroundColor = .clear
-        // Transparent so the page's translucent surfaces sit on the glass material.
-        webView.setValue(false, forKey: "drawsBackground")
-        bubble.addSubview(webView)
-
-        panel = KeyablePanel(contentRect: total,
+        panel = KeyablePanel(contentRect: content,
                              styleMask: [.borderless, .nonactivatingPanel],
                              backing: .buffered, defer: false)
         panel.isFloatingPanel = true
@@ -175,56 +137,7 @@ final class AppController: NSObject, NSApplicationDelegate, WKNavigationDelegate
         panel.isMovableByWindowBackground = false
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.contentView = bubble
-
-        if repoMissing {
-            showError("Can’t find the inbox-keeper folder",
-                      "Set <code>MAIL_TRIAGE_DIR</code> to your clone, or put it at <code>~/mail-triage</code>. Looked for <code>lib/keeper_server.py</code>.")
-        } else {
-            loadPanel()
-        }
-    }
-
-    func loadPanel() { webView.load(URLRequest(url: PANEL_URL)) }
-
-    func showError(_ title: String, _ detail: String) {
-        let html = """
-        <html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-        <style>html,body{height:100%}body{font:14px -apple-system,system-ui;color:#3a342e;
-        background:#f8f4ed;margin:0;display:flex;align-items:center;justify-content:center;text-align:center}
-        .b{max-width:300px;padding:24px}h2{font-size:17px;margin:0 0 8px}p{color:#7a7268;line-height:1.5}
-        code{background:#ece6dc;padding:2px 5px;border-radius:4px;font-size:12px}</style></head>
-        <body><div class="b"><h2>\(title)</h2><p>\(detail)</p></div></body></html>
-        """
-        webView.loadHTMLString(html, baseURL: nil)
-    }
-
-    func webView(_ wv: WKWebView, didFailProvisionalNavigation nav: WKNavigation!, withError e: Error) {
-        guard loadRetries < 25 else {
-            showError("Couldn’t reach the panel",
-                      "The local keeper server didn’t respond on port \(PORT). Try quitting and reopening, or run <code>./bin/inbox-keeper dashboard</code> from the repo.")
-            return
-        }
-        loadRetries += 1
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.loadPanel() }
-    }
-
-    // Open external links (a tapped open-loop -> Gmail) in the user's real browser.
-    func webView(_ wv: WKWebView, decidePolicyFor action: WKNavigationAction,
-                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        if let url = action.request.url, let host = url.host,
-           host != "127.0.0.1", host != "localhost" {
-            NSWorkspace.shared.open(url)
-            decisionHandler(.cancel)
-            return
-        }
-        decisionHandler(.allow)
-    }
-
-    func webView(_ wv: WKWebView, createWebViewWith config: WKWebViewConfiguration,
-                 for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = action.request.url { NSWorkspace.shared.open(url) }
-        return nil
+        panel.contentView = glass
     }
 
     @objc func togglePanel() {
@@ -232,8 +145,9 @@ final class AppController: NSObject, NSApplicationDelegate, WKNavigationDelegate
     }
 
     func showPanel() {
+        removeMonitors()                    // never double-register (showPanel without a paired hide)
         positionPanel()
-        webView.reload()
+        model.onPanelOpen()                 // reload + re-attach to any live job (never reload-blow-away)
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) {
@@ -253,27 +167,25 @@ final class AppController: NSObject, NSApplicationDelegate, WKNavigationDelegate
 
     func hidePanel() {
         panel.orderOut(nil)
+        removeMonitors()
+    }
+
+    func removeMonitors() {
         if let m = clickMonitor { NSEvent.removeMonitor(m); clickMonitor = nil }
         if let m = escMonitor { NSEvent.removeMonitor(m); escMonitor = nil }
     }
 
-    // Snug under the menu-bar item: arrow tip just below the bar, pointing at the
-    // item's centre; window clamped to the screen.
+    // Snug under the menu-bar item: top-right of the panel sits below the item,
+    // clamped to the screen.
     func positionPanel() {
         guard let button = statusItem.button, let bWin = button.window else { return }
         let f = bWin.convertToScreen(button.convert(button.bounds, to: nil))
         let visible = (bWin.screen ?? NSScreen.main)?.visibleFrame
             ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let winH = PANEL_H + ARROW_H
-        // Place the window so the arrow sits ~40px from its right edge under the item.
-        var originX = f.midX - (PANEL_W - 40)
+        var originX = f.midX - (PANEL_W - 30)
         originX = max(visible.minX + 8, min(originX, visible.maxX - PANEL_W - 8))
-        let originY = f.minY - GAP - winH
-        var ax = f.midX - originX
-        ax = max(CORNER + ARROW_W, min(ax, PANEL_W - CORNER - ARROW_W))
-        bubble.arrowX = ax
-        bubble.needsDisplay = true
-        panel.setFrame(NSRect(x: originX, y: originY, width: PANEL_W, height: winH), display: true)
+        let originY = f.minY - GAP - PANEL_H
+        panel.setFrame(NSRect(x: originX, y: originY, width: PANEL_W, height: PANEL_H), display: true)
     }
 
     func startServer() {
@@ -295,10 +207,7 @@ final class AppController: NSObject, NSApplicationDelegate, WKNavigationDelegate
             try p.run()
             server = p
         } catch {
-            DispatchQueue.main.async { [weak self] in
-                self?.showError("Couldn’t start the keeper server",
-                                "Failed to launch python3: \(error.localizedDescription). Make sure Python 3 is installed.")
-            }
+            repoMissing = true
         }
     }
 
@@ -307,7 +216,10 @@ final class AppController: NSObject, NSApplicationDelegate, WKNavigationDelegate
     }
 }
 
-let app = NSApplication.shared
-let controller = AppController()
-app.delegate = controller
-app.run()
+// Top-level entry runs on the main thread; assert that to the concurrency checker.
+MainActor.assumeIsolated {
+    let app = NSApplication.shared
+    let controller = AppController()
+    app.delegate = controller
+    app.run()
+}
