@@ -169,14 +169,17 @@ function renderLoops() {
     return `<li class="row" role="button" tabindex="0" data-thread="${esc(r.thread_id)}"
         data-slug="${esc(a.slug)}" data-sender="${esc(r.sender)}"
         data-email="${esc(r.sender_email || "")}" data-subject="${esc(r.subject)}"
-        data-snippet="${esc(r.snippet || "")}">
+        data-snippet="${esc(r.snippet || "")}" data-epoch="${r.epoch || 0}">
       <span class="mono" style="background:${esc(a.color)}">${esc(a.short)}</span>
       <span class="body">
         <span class="sender">${esc(r.sender)}</span>
         <span class="ask">${esc(r.subject)}</span>
       </span>
       <span class="meta"><span class="when">${esc(relTime(r.epoch))}</span></span>
-      <button class="row-dismiss" data-dismiss aria-label="Set aside: ${esc(r.subject)}" title="Set aside (reversible)">${archiveSvg()}</button>
+      <span class="row-actions">
+        <button class="row-act" data-reply aria-label="Reply to: ${esc(r.subject)}" title="Draft a reply">${replySvg()}</button>
+        <button class="row-act" data-dismiss aria-label="Set aside: ${esc(r.subject)}" title="Set aside (reversible)">${archiveSvg()}</button>
+      </span>
     </li>`;
   }).join("");
 
@@ -200,7 +203,10 @@ function renderAccounts() {
       <span class="num"><b>${a.ok ? a.inbox_threads : "—"}</b><span>open</span></span>
     </li>`;
   }).join("");
-  return `<ul class="acct-list">${cards}</ul>`;
+  return `<ul class="acct-list">${cards}</ul>
+    <button class="add-account" data-add-account>
+      <span class="plus">+</span> Add a Gmail account
+    </button>`;
 }
 
 function renderUndo() {
@@ -288,6 +294,9 @@ function alertSvg() {
 function archiveSvg() {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><path d="M10 12h4"/></svg>`;
 }
+function replySvg() {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17l-5-5 5-5"/><path d="M4 12h11a5 5 0 0 1 5 5v1"/></svg>`;
+}
 function runSvg() {
   return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>`;
 }
@@ -339,37 +348,80 @@ function wireView() {
   viewEl.querySelectorAll("[data-dismiss]").forEach((btn) => {
     btn.onclick = (e) => { e.stopPropagation(); doDismiss(btn.closest(".row")); };
   });
+  viewEl.querySelectorAll("[data-reply]").forEach((btn) => {
+    btn.onclick = (e) => { e.stopPropagation(); openComposer(btn.closest(".row").dataset); };
+  });
   viewEl.querySelectorAll("[data-restore]").forEach((btn) => {
     btn.onclick = () => doUndo(btn.dataset.slug, btn.dataset.label, btn);
   });
+  const addBtn = $("[data-add-account]", viewEl);
+  if (addBtn) addBtn.onclick = () => addAccount(addBtn);
+}
+
+async function addAccount(btn) {
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner dark"></span> Opening your browser…`;
+  const ok = await startJob("/api/add-account", {});
+  if (!ok) { btn.disabled = false; btn.innerHTML = `<span class="plus">+</span> Add a Gmail account`; }
+}
+
+// Remove / re-insert a loop from the in-memory STATE so the count AND the list
+// stay consistent across tab switches without waiting for a full rebuild.
+function dropLoop(slug, threadId) {
+  for (const a of STATE?.accounts || []) {
+    if (a.slug !== slug) continue;
+    const before = (a.loops || []).length;
+    a.loops = (a.loops || []).filter((l) => l.thread_id !== threadId);
+    if (a.loops.length < before) a.inbox_threads = Math.max(0, (a.inbox_threads || 1) - 1);
+  }
+  recomputeTotal();
+}
+function readdLoop(slug, loop) {
+  for (const a of STATE?.accounts || []) {
+    if (a.slug !== slug) continue;
+    if (!(a.loops || []).some((l) => l.thread_id === loop.thread_id)) {
+      a.loops = [loop, ...(a.loops || [])];
+      a.inbox_threads = (a.inbox_threads || 0) + 1;
+    }
+  }
+  recomputeTotal();
+}
+function recomputeTotal() {
+  if (!STATE) return;
+  STATE.total_loops = (STATE.accounts || [])
+    .filter((a) => a.ok).reduce((s, a) => s + (a.inbox_threads || 0), 0);
 }
 
 async function doDismiss(row) {
   if (!row) return;
   const d = row.dataset;
+  const loop = { thread_id: d.thread, sender: d.sender, sender_email: d.email,
+                 subject: d.subject, snippet: d.snippet, epoch: Number(d.epoch || 0),
+                 account_slug: d.slug };
   row.classList.add("removing");
-  // Optimistically drop the row and the count; correct on next refresh.
   setTimeout(() => row.remove(), 180);
-  if (STATE && typeof STATE.total_loops === "number") {
-    STATE.total_loops = Math.max(0, STATE.total_loops - 1);
-    const c = $(".hero .count");
-    if (c) c.textContent = STATE.total_loops;
-  }
+  dropLoop(d.slug, d.thread);                 // keep data + count in sync
+  renderStrip();
+  const c = $(".hero .count"); if (c) c.textContent = STATE.total_loops;
   const { ok, data } = await api("/api/dismiss", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ slug: d.slug, thread_id: d.thread, sender: d.sender,
-      sender_email: d.email, subject: d.subject, snippet: d.snippet }),
+      sender_email: d.email, subject: d.subject, snippet: d.snippet, epoch: loop.epoch }),
   });
   if (!ok) { toast("Couldn’t set aside"); loadState(); return; }
-  toastUndo("Set aside", () => doRestoreThread(d, data && data.label));
+  toastUndo("Set aside", () => doRestoreThread(d, loop, data && data.label));
 }
 
-async function doRestoreThread(d, label) {
+async function doRestoreThread(d, loop, label) {
+  readdLoop(d.slug, loop);
+  if (VIEW === "loops") render();
+  renderStrip();
   await api("/api/dismiss", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ undo: true, slug: d.slug, thread_id: d.thread, label }),
+    body: JSON.stringify({ undo: true, slug: d.slug, thread_id: d.thread, label,
+      sender: d.sender, sender_email: d.email, subject: d.subject,
+      snippet: d.snippet, epoch: loop.epoch }),
   });
-  loadState();
 }
 
 /* ---------- jobs ---------- */
@@ -412,6 +464,88 @@ async function runKeeper() {
 async function doUndo(slug, label, btn) {
   btn.disabled = true; btn.textContent = "Restoring…";
   await startJob("/api/undo", { slug, label });
+}
+
+/* ---------- reply composer ---------- */
+let COMPOSER = null;
+
+function openComposer(d) {
+  COMPOSER = { slug: d.slug, thread: d.thread, sender: d.sender,
+               subject: d.subject, to_email: d.email, original: "" };
+  let el = $(".composer", panelEl);
+  if (!el) { el = document.createElement("div"); el.className = "composer"; panelEl.appendChild(el); }
+  el.innerHTML = `
+    <div class="composer-head">
+      <div>
+        <div class="composer-to">Reply to ${esc(d.sender)}</div>
+        <div class="composer-subj">${esc(d.subject)}</div>
+      </div>
+      <button class="composer-x" aria-label="Close">${xSvg()}</button>
+    </div>
+    <div class="composer-body">
+      <div class="composer-loading"><span class="spinner dark"></span> Drafting in your voice…</div>
+      <textarea class="composer-text" spellcheck="true" aria-label="Reply" hidden></textarea>
+    </div>
+    <div class="composer-foot">
+      <button class="btn btn-ghost" data-c-regen disabled>${runSvg()}<span>Regenerate</span></button>
+      <button class="btn btn-primary" data-c-send disabled>Send reply</button>
+    </div>`;
+  requestAnimationFrame(() => el.classList.add("show"));
+  $(".composer-x", el).onclick = closeComposer;
+  $("[data-c-regen]", el).onclick = () => generateDraft(true);
+  $("[data-c-send]", el).onclick = sendDraft;
+  generateDraft(false);
+}
+
+function closeComposer() {
+  const el = $(".composer", panelEl);
+  if (el) { el.classList.remove("show"); setTimeout(() => el.remove(), 200); }
+  COMPOSER = null;
+}
+
+async function generateDraft(isRegen) {
+  const el = $(".composer", panelEl);
+  if (!el || !COMPOSER) return;
+  const ta = $(".composer-text", el), load = $(".composer-loading", el);
+  const send = $("[data-c-send]", el), regen = $("[data-c-regen]", el);
+  ta.hidden = true; load.hidden = false; send.disabled = true; regen.disabled = true;
+  const steer = isRegen ? (prompt("Adjust the draft (e.g. ‘shorter’, ‘warmer’, ‘decline politely’):") || "") : "";
+  const { ok, data } = await api("/api/draft", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ slug: COMPOSER.slug, thread_id: COMPOSER.thread, steer }),
+  });
+  load.hidden = true;
+  if (!ok || !data || !data.body) { toast("Couldn’t draft a reply"); closeComposer(); return; }
+  COMPOSER.original = data.body;
+  COMPOSER.to_email = data.to_email || COMPOSER.to_email;
+  COMPOSER.subject = data.subject || COMPOSER.subject;
+  ta.value = data.body; ta.hidden = false; ta.focus();
+  send.disabled = false; regen.disabled = false;
+}
+
+async function sendDraft() {
+  const el = $(".composer", panelEl);
+  if (!el || !COMPOSER) return;
+  const ta = $(".composer-text", el), send = $("[data-c-send]", el);
+  const body = ta.value.trim();
+  if (!body) { toast("Write a reply first"); return; }
+  send.disabled = true; send.textContent = "Sending…";
+  const { ok } = await api("/api/draft/send", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ slug: COMPOSER.slug, thread_id: COMPOSER.thread,
+      to_email: COMPOSER.to_email, subject: COMPOSER.subject,
+      body, original: COMPOSER.original }),
+  });
+  if (!ok) { toast("Couldn’t send"); send.disabled = false; send.textContent = "Send reply"; return; }
+  dropLoop(COMPOSER.slug, COMPOSER.thread);
+  closeComposer();
+  if (VIEW === "loops") render();
+  renderStrip();
+  toast("Reply sent");
+}
+
+function xSvg() {
+  return `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>`;
 }
 
 async function savePolicy() {

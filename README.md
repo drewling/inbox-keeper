@@ -85,8 +85,13 @@ with `gws auth login` (see the `gws` docs for multi-account setup).
 ```
 
 Click the menu-bar icon to open the panel. Hit **Run keeper now** to tidy every
-inbox to only what needs you. Click any loop to open it in Gmail. Made a mistake?
-**Undo** restores a whole day's archived mail.
+inbox to only what needs you. Click any loop to open it in Gmail, or hover it to
+**Reply** (drafts in your voice; review, edit, and send in the panel) or **set it
+aside** (archived reversibly). Made a mistake? **Undo** restores a whole day's
+archived mail. Add more inboxes from the **Accounts** tab.
+
+As you set loops aside and edit drafts, the keeper learns your preferences and
+applies them; you can see what it learned in the **Policy** tab.
 
 To run it automatically every morning, point a `launchd` job at
 `./bin/inbox-keeper run` (the repo's `run.sh` shows the full daily pipeline).

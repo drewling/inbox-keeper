@@ -95,28 +95,10 @@ for acct in accts:
     || { echo "missed_sweep failed"; rc=1; }
   echo "=== catch-up done $(date +%H:%M:%S) ==="
 
-  # --- Draft replies for primary account action items, then queue for Slack review ---
-  echo "--- generating reply drafts ($PRIMARY_EMAIL) ---"
-  "$MAIL_TRIAGE_PYTHON" "$MAIL_TRIAGE_LIB/gen_drafts.py" \
-    "$PRIMARY_CONFIG" "$PRIMARY_EMAIL" 1d \
-    || { echo "gen_drafts failed"; rc=1; }
-
-  # --- Slack: morning briefing + draft cards + actionable missed-item cards ---
-  SLACK_CONFIG="$MAIL_TRIAGE_DIR/slack_app/config.env"
-  if [ -f "$SLACK_CONFIG" ] && grep -q '^SLACK_BOT_TOKEN=xoxb-' "$SLACK_CONFIG"; then
-    echo "--- building briefing + posting to Slack ---"
-    "$MAIL_TRIAGE_PYTHON" "$MAIL_TRIAGE_LIB/build_briefing.py" \
-      || { echo "briefing build failed"; rc=1; }
-    ( set -a; . "$SLACK_CONFIG"; set +a
-      cd "$MAIL_TRIAGE_DIR/slack_app"
-      ./venv/bin/python app.py brief      || { echo "slack brief failed"; rc=1; }
-      ./venv/bin/python app.py post       || { echo "slack post failed"; rc=1; }
-      ./venv/bin/python app.py post-missed "$MAIL_TRIAGE_DRAFTS/missed_today.json" \
-        || { echo "slack post-missed failed"; rc=1; }
-    )
-  else
-    echo "--- slack not configured yet; drafts queued only ---"
-  fi
+  # Reply drafting now happens on demand inside the app (tap Reply on a loop),
+  # so the daily run no longer pre-generates drafts or posts to Slack. The Slack
+  # review flow still lives in slack_app/ and docs/PIPELINE.md for anyone who
+  # wants it, but it is not part of the default experience.
   echo "=== done $(date +%H:%M:%S) ==="
 } >"$LOG" 2>&1
 
