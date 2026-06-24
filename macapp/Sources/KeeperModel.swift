@@ -71,6 +71,11 @@ final class KeeperModel: ObservableObject {
     }
     @Published var preflight = Preflight()
 
+    // Timing: protect mail newer than N days (the keeper run honors this).
+    @Published var graceDays: Int = 0
+    // First-run backlog offer: shown once after the first inbox connects.
+    @Published var backlogOffered: Bool = UserDefaults.standard.bool(forKey: "backlogOffered")
+
     let api: KeeperAPI
     private var pollTask: Task<Void, Never>?
     private var activeJobId = -1
@@ -78,6 +83,13 @@ final class KeeperModel: ObservableObject {
     private var toastToken = UUID()
 
     init(port: String) { api = KeeperAPI(port: port) }
+
+    /// One-time first-run offer to clear the backlog, shown once after the first
+    /// inbox connects (and never again once dismissed).
+    var showBacklogStep: Bool {
+        guard !backlogOffered, !needsOnboarding, let s = state else { return false }
+        return s.accounts.contains { $0.ok }
+    }
 
     /// Show the welcome/setup takeover until at least one account is connected.
     var needsOnboarding: Bool {
@@ -110,6 +122,11 @@ final class KeeperModel: ObservableObject {
     // MARK: derived state
     /// A full-inbox cleanup run is in flight — show the takeover "Tidying…" state.
     var isKeeping: Bool { job?.isRunning == true && job?.kind == "run" }
+    /// A light, non-archiving job in flight (label backfill or backlog archive) —
+    /// surfaced via the slim banner, never the full takeover.
+    var isWorkingInline: Bool {
+        job?.isRunning == true && (job?.kind == "populate" || job?.kind == "archive_before")
+    }
     /// Any background job is in flight — disable the action button.
     var isBusy: Bool { job?.isRunning == true }
 
@@ -130,9 +147,30 @@ final class KeeperModel: ObservableObject {
         Task {
             await reload()
             await loadCategories()
+            await loadSettings()
             await syncJob()
             maybeAutoRun()
         }
+    }
+
+    /// Pull timing settings from the server (grace window).
+    func loadSettings() async {
+        if let s = try? await api.settings() { graceDays = s.graceDays }
+    }
+
+    /// Persist the grace window; honored by the next keeper run.
+    func saveGraceDays(_ n: Int) {
+        graceDays = n
+        Task {
+            do { try await api.saveSettings(graceDays: n) }
+            catch { toast("Couldn’t save timing") }
+        }
+    }
+
+    /// Mark the one-time first-run backlog offer as seen so it never shows again.
+    func dismissBacklog() {
+        backlogOffered = true
+        UserDefaults.standard.set(true, forKey: "backlogOffered")
     }
 
     func reload() async {
@@ -168,6 +206,19 @@ final class KeeperModel: ObservableObject {
 
     func runKeeper() {
         beginJob(kind: "run", starting: "Starting…") { try await self.api.run() }
+    }
+    /// Label-only backfill over the last `windowDays` for one account. Shows in the
+    /// slim banner (not the full takeover) since it never archives.
+    func populateLabels(slug: String, windowDays: Int) {
+        beginJob(kind: "populate", starting: "Sorting recent mail…") {
+            try await self.api.populateLabels(slug: slug, windowDays: windowDays)
+        }
+    }
+    /// Reversibly archive everything before `before` (YYYY/MM/DD). `slug` nil = all.
+    func archiveBefore(slug: String? = nil, before: String) {
+        beginJob(kind: "archive_before", starting: "Clearing older mail…") {
+            try await self.api.archiveBefore(slug: slug, before: before)
+        }
     }
     func undo(_ point: UndoPoint, slug: String) {
         beginJob(kind: "undo", starting: "Restoring…") { try await self.api.undo(slug: slug, label: point.label) }
@@ -223,6 +274,8 @@ final class KeeperModel: ObservableObject {
         let msg: String
         switch j.kind {
         case "run": msg = j.message.isEmpty ? "Inbox updated" : j.message
+        case "populate": msg = j.message.isEmpty ? "Labels updated" : j.message
+        case "archive_before": msg = (j.message.isEmpty ? "Backlog cleared" : j.message) + " — undo any time"
         case "add_account": msg = "Account added"
         case "undo": msg = "Restored"
         default: msg = "Updated"

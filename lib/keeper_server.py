@@ -15,7 +15,7 @@ Stdlib only (no dependencies) so the open-source install stays trivial. Binds to
 Only one background job runs at a time (keeper operations touch Gmail and should
 not overlap). The panel polls /api/job while one is active.
 """
-import json, os, subprocess, sys, threading, time
+import json, os, re, subprocess, sys, threading, time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
@@ -26,6 +26,8 @@ STATE_PATH = os.path.join(ROOT, "app", "state.json")
 POLICY_PATH = os.path.join(ROOT, "keep-policy.md")
 ACCOUNTS_PATH = os.path.join(ROOT, "accounts.json")
 CATEGORIES_PATH = os.path.join(ROOT, "categories.json")
+SETTINGS_PATH = os.path.join(ROOT, "app", "settings.json")
+_DATE_RE = re.compile(r"^\d{4}/\d{2}/\d{2}$")
 PYTHON = sys.executable or "python3"
 CLAUDE = os.environ.get("CLAUDE_BIN", "claude")
 
@@ -139,9 +141,10 @@ def _load_accounts():
 
 def _run_keeper(payload):
     """Run the open-loop sweep across all accounts at the daily grace, then rebuild."""
-    # grace 0: review the whole inbox and trust the keep-bar (fresh noise gets set
-    # aside too; genuine fresh mail is kept; everything is reversible via Undo).
-    grace = int(payload.get("grace_days", 0))
+    # Grace = protect mail newer than N days. The user's persisted setting is the
+    # source of truth (default 0 = review the whole inbox and trust the keep-bar);
+    # a payload value overrides it. Everything is reversible via Undo.
+    grace = int(payload.get("grace_days", _read_settings()["grace_days"]))
     accts = _load_accounts()
     failures, set_aside, kept = [], 0, 0
     for i, acct in enumerate(accts, 1):
@@ -167,6 +170,60 @@ def _run_keeper(payload):
     subprocess.run([PYTHON, os.path.join(HERE, "learn.py")],
                    env=_gws_env(), capture_output=True, text=True, timeout=180)
     _set_job_message(f"Set aside {set_aside}, {kept} still need you")
+    _build_state_blocking()
+    if failures:
+        raise RuntimeError("Some accounts failed: " + " | ".join(failures))
+
+
+def _run_populate(payload):
+    """Label-only backfill: sort the last N days of inbox mail into category labels.
+    One account (slug) or all. Never archives — purely additive labeling."""
+    window = max(1, min(int(payload.get("window_days", 30)), 365))
+    slug = payload.get("slug")
+    accts = [_acct(slug)] if slug else _load_accounts()
+    failures, labeled = [], 0
+    for i, acct in enumerate(accts, 1):
+        cfg = acct["config_dir"]
+        email = acct.get("email", acct.get("slug", cfg))
+        _set_job_message(f"Sorting {email} ({i}/{len(accts)})…")
+        r = subprocess.run([PYTHON, os.path.join(HERE, "review_open_loops.py"),
+                            cfg, email, "--label-only", "--window-days", str(window)],
+                           env=_gws_env(), capture_output=True, text=True, timeout=900)
+        if r.returncode != 0:
+            failures.append(f"{email}: {(r.stderr or r.stdout or '').strip()[-200:]}")
+            continue
+        line = [l for l in r.stdout.splitlines() if l.strip().startswith("{")]
+        if line:
+            try:
+                labeled += int(json.loads(line[-1]).get("labeled", 0) or 0)
+            except Exception:
+                pass
+        _set_job_message(f"Labeled {labeled} so far…")
+    _set_job_message(f"Labeled {labeled} recent thread{'' if labeled == 1 else 's'}")
+    _build_state_blocking()
+    if failures:
+        raise RuntimeError("Some accounts failed: " + " | ".join(failures))
+
+
+def _run_archive_before(payload):
+    """Reversibly archive every inbox thread before a date (YYYY/MM/DD), except
+    high-stakes mail. One account (slug) or all. Recovery label shows in Undo."""
+    sys.path.insert(0, HERE)
+    import inbox_zero as iz  # noqa: E402
+    before = payload.get("before")
+    slug = payload.get("slug")
+    accts = [_acct(slug)] if slug else _load_accounts()
+    failures, archived = [], 0
+    for i, acct in enumerate(accts, 1):
+        cfg = acct["config_dir"]
+        email = acct.get("email", acct.get("slug", cfg))
+        _set_job_message(f"Clearing {email} ({i}/{len(accts)})…")
+        try:
+            archived += int(iz.archive_before(cfg, before).get("archived", 0) or 0)
+        except Exception as exc:
+            failures.append(f"{email}: {exc}")
+        _set_job_message(f"Archived {archived} so far…")
+    _set_job_message(f"Archived {archived} older thread{'' if archived == 1 else 's'}")
     _build_state_blocking()
     if failures:
         raise RuntimeError("Some accounts failed: " + " | ".join(failures))
@@ -744,8 +801,36 @@ def _read_categories():
     return _DEFAULT_CATEGORIES
 
 
+_DEFAULT_SETTINGS = {"grace_days": 0}
+
+
+def _read_settings():
+    """User timing settings (grace_days). Defaults if file is missing/unreadable."""
+    s = dict(_DEFAULT_SETTINGS)
+    try:
+        if os.path.isfile(SETTINGS_PATH):
+            with open(SETTINGS_PATH) as f:
+                s.update({k: v for k, v in json.load(f).items() if k in _DEFAULT_SETTINGS})
+    except Exception:
+        pass
+    return s
+
+
+def _write_settings(settings):
+    """Persist the whitelisted settings keys. Returns the saved dict."""
+    s = dict(_DEFAULT_SETTINGS)
+    s.update({k: v for k, v in (settings or {}).items() if k in _DEFAULT_SETTINGS})
+    os.makedirs(os.path.dirname(SETTINGS_PATH), exist_ok=True)
+    tmp = SETTINGS_PATH + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(s, f, indent=2)
+    os.replace(tmp, SETTINGS_PATH)
+    return s
+
+
 _JOB_KINDS = {"refresh": lambda p: _build_state_blocking(),
-              "run": _run_keeper, "undo": _run_undo, "add_account": _add_account}
+              "run": _run_keeper, "undo": _run_undo, "add_account": _add_account,
+              "populate": _run_populate, "archive_before": _run_archive_before}
 
 
 def _set_job_message(msg):
@@ -845,6 +930,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"policy": text})
         if p == "/api/categories":
             return self._send(200, {"categories": _read_categories()})
+        if p == "/api/settings":
+            return self._send(200, _read_settings())
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -882,6 +969,29 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, _delete_account_labels(slug, ids))
             except Exception as exc:
                 return self._send(500, {"error": str(exc)})
+
+        # Time-windowed jobs: validate, then start like any other job (202 + job id).
+        if p in ("/api/labels/populate", "/api/archive-before"):
+            slug = payload.get("slug")
+            if slug is not None:
+                try:
+                    _acct(slug)
+                except ValueError as exc:
+                    return self._send(400, {"error": str(exc)})
+            if p == "/api/labels/populate":
+                w = payload.get("window_days", 30)
+                if not isinstance(w, int) or not (1 <= w <= 365):
+                    return self._send(400, {"error": "window_days must be 1–365"})
+                kind = "populate"
+            else:
+                before = payload.get("before")
+                if not isinstance(before, str) or not _DATE_RE.match(before):
+                    return self._send(400, {"error": "before must be YYYY/MM/DD"})
+                kind = "archive_before"
+            jid = _start_job(kind, payload)
+            if jid is None:
+                return self._send(409, {"error": "a job is already running"})
+            return self._send(202, {"job": jid, "kind": kind})
 
         # Fast synchronous endpoints (one thread / one model call), not the job slot.
         _sync = {"/api/dismiss": _dismiss, "/api/draft": _gen_draft,
@@ -948,6 +1058,15 @@ class Handler(BaseHTTPRequestHandler):
                 json.dump({"categories": validated}, f, ensure_ascii=False, indent=2)
             os.replace(tmp, CATEGORIES_PATH)
             return self._send(200, {"ok": True})
+
+        if p == "/api/settings":
+            g = payload.get("grace_days")
+            if not isinstance(g, int) or isinstance(g, bool) or not (0 <= g <= 90):
+                return self._send(400, {"error": "grace_days must be an int 0–90"})
+            try:
+                return self._send(200, _write_settings({"grace_days": g}))
+            except Exception as exc:
+                return self._send(500, {"error": str(exc)})
 
         return self._send(404, {"error": "not found"})
 

@@ -14,6 +14,8 @@ struct PanelView: View {
         ZStack(alignment: .bottom) {
             if m.needsOnboarding {
                 OnboardingView()
+            } else if m.showBacklogStep {
+                BacklogStep()
             } else {
                 VStack(spacing: 0) {
                     TopBar()
@@ -201,18 +203,18 @@ private struct LoopsView: View {
             // While keeping, never show an "all clear" / error empty state — counts are
             // mid-flight. Fall through to the list path so the slim TidyingBanner shows
             // on top and the inbox stays visible + scrollable instead of a full takeover.
-            if total == 0 && !failed.isEmpty && !m.isKeeping {
+            if total == 0 && !failed.isEmpty && !m.isKeeping && !m.isWorkingInline {
                 EmptyState(symbol: "exclamationmark.triangle", warn: true,
                            title: "Couldn’t check your inboxes",
                            message: "\(failed.count == 1 ? "An account" : "\(failed.count) accounts") didn’t respond, so this isn’t a real “all clear”. \(failed.first?.error ?? "")")
-            } else if total == 0 && !m.isKeeping {
+            } else if total == 0 && !m.isKeeping && !m.isWorkingInline {
                 EmptyState(symbol: "checkmark", warn: false,
                            title: "Your inboxes are clear",
                            message: "Nothing is waiting on you across \(m.state?.accounts.count ?? 0) accounts. Everything else was set aside, reversibly.")
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        if m.isKeeping { TidyingBanner(message: m.job?.message ?? "Starting…") }
+                        if m.isKeeping || m.isWorkingInline { TidyingBanner(message: m.job?.message ?? "Starting…") }
                         if !failed.isEmpty { Banner(text: bannerText(failed), error: true) }
                         HeroCount(total: total, accounts: m.state?.accounts.count ?? 0)
                         SectionLabel("Waiting on you")
@@ -437,6 +439,7 @@ private struct PolicyView: View {
             VStack(alignment: .leading, spacing: 24) {
                 KeepPolicySection()
                 CategoriesSection()
+                TimingSection()
                 LearnedSection()
             }
             .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 18)
@@ -473,6 +476,49 @@ private struct KeepPolicySection: View {
                 .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Paper.sunken.opacity(0.24))
                     .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Paper.hairline.opacity(0.12), lineWidth: 0.5)))
             HStack { Spacer(); Button("Save") { m.savePolicy() }.buttonStyle(GhostButtonStyle()) }
+        }
+    }
+}
+
+// MARK: Timing
+
+// Controls the time windows the app acts in: the keeper's protect window (persisted,
+// honored on the next run) and a one-off reversible "clear everything before a date".
+private struct TimingSection: View {
+    @EnvironmentObject var m: KeeperModel
+    @State private var beforeDate = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+    private static let fmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/MM/dd"; return f
+    }()
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SettingsHeader("Timing",
+                           "The windows the keeper works in. Newer mail is left untouched; older mail can be cleared in one reversible sweep.")
+            HStack(spacing: 10) {
+                Text("Protect mail newer than").font(.system(size: 12.5)).foregroundStyle(Paper.ink2)
+                Picker("", selection: Binding(get: { m.graceDays }, set: { m.saveGraceDays($0) })) {
+                    Text("Off").tag(0)
+                    Text("1 day").tag(1)
+                    Text("2 days").tag(2)
+                    Text("3 days").tag(3)
+                    Text("7 days").tag(7)
+                }
+                .pickerStyle(.menu).labelsHidden().fixedSize().controlSize(.small)
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 10) {
+                Text("Clear everything before").font(.system(size: 12.5)).foregroundStyle(Paper.ink2)
+                DatePicker("", selection: $beforeDate, in: ...Date(), displayedComponents: .date)
+                    .datePickerStyle(.field).labelsHidden().fixedSize()
+                Spacer(minLength: 6)
+                Button { m.archiveBefore(before: Self.fmt.string(from: beforeDate)) } label: {
+                    Text("Clear backlog")
+                }
+                .buttonStyle(GhostButtonStyle()).disabled(m.isBusy)
+            }
+            Text("Clearing removes the inbox label and adds a dated recovery label across every account — undo any time from the Undo tab. High-stakes mail (starred, flagged, live sign/pay/legal) is always kept.")
+                .font(.system(size: 11)).foregroundStyle(Paper.ink4)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -863,6 +909,7 @@ private struct FormatBar: View {
 private struct CleanupView: View {
     @EnvironmentObject var m: KeeperModel
     @State private var confirming = false
+    @State private var sortWindow = 30
     private var c: CleanupState? { m.cleanup }
 
     var body: some View {
@@ -917,6 +964,29 @@ private struct CleanupView: View {
                     }
                     .frame(maxHeight: 300)
                 }
+
+                // Sort recent mail into category labels (label-only backfill — never
+                // archives). Light: skips already-labeled + handled threads server-side.
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles").font(.system(size: 11)).foregroundStyle(Paper.accentSoft)
+                    Text("Sort the last").font(.system(size: 11.5)).foregroundStyle(Paper.ink3)
+                    Picker("", selection: $sortWindow) {
+                        Text("7 days").tag(7)
+                        Text("30 days").tag(30)
+                        Text("90 days").tag(90)
+                    }
+                    .pickerStyle(.menu).labelsHidden().fixedSize().controlSize(.small)
+                    Text("into labels").font(.system(size: 11.5)).foregroundStyle(Paper.ink3)
+                    Spacer(minLength: 6)
+                    Button {
+                        guard let slug = c?.slug else { return }
+                        m.populateLabels(slug: slug, windowDays: sortWindow)
+                        m.closeCleanup()
+                    } label: { Text("Sort recent mail") }
+                    .buttonStyle(GhostButtonStyle()).disabled(m.isBusy)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 9)
+                .overlay(alignment: .top) { Rectangle().fill(Paper.hairline.opacity(0.1)).frame(height: 0.5) }
 
                 // Footer
                 HStack(spacing: 9) {

@@ -152,11 +152,11 @@ def _replied_before(cfg, email):
     return v
 
 
-def _thread_ids(cfg, grace_days):
+def _thread_ids_q(cfg, q):
+    """All thread ids matching a Gmail query, paged."""
     ids, tok = [], None
-    cq = _candidate_q(grace_days)
     while True:
-        p = {"userId": "me", "q": cq, "maxResults": 500}
+        p = {"userId": "me", "q": q, "maxResults": 500}
         if tok:
             p["pageToken"] = tok
         d = iz.gws(cfg, ["gmail", "users", "threads", "list", "--params", json.dumps(p)])
@@ -165,6 +165,10 @@ def _thread_ids(cfg, grace_days):
         if not tok:
             break
     return ids
+
+
+def _thread_ids(cfg, grace_days):
+    return _thread_ids_q(cfg, _candidate_q(grace_days))
 
 
 def _thread_info(cfg, tid, me):
@@ -181,9 +185,12 @@ def _thread_info(cfg, tid, me):
     snippet = (last.get("snippet", "") or "")[:160]
     last_email = (parseaddr(last_from)[1] or "").lower()
     last_from_owner = bool(me and me.lower() in last_from.lower())
+    label_ids = set()
+    for m in msgs:
+        label_ids.update(m.get("labelIds") or [])
     return {"id": tid, "ids": [m["id"] for m in msgs], "last_from": last_from,
             "last_email": last_email, "last_from_owner": last_from_owner,
-            "subject": subject, "snippet": snippet}
+            "subject": subject, "snippet": snippet, "label_ids": label_ids}
 
 
 def _learned_preface():
@@ -326,6 +333,65 @@ def apply_category(cfg, thread_id, category_name):
         pass  # category labeling is additive; never block the keeper run
 
 
+def _known_category_label_names():
+    """All category label names we'd ever apply: current categories ∪ history."""
+    return {_category_label_name(c) for c in _categories()} | _load_label_history()
+
+
+def _backfill_partition(infos, cat_label_names, id_to_name):
+    """Pure split of candidate threads for the label-only backfill.
+
+    Returns (to_judge, skipped_labeled, skipped_handled):
+    - skip a thread already carrying any of our category labels (don't reclassify),
+    - skip a thread whose last message is the owner's (already handled, never a loop),
+    - everything else needs the classifier.
+    """
+    to_judge, skipped_labeled, skipped_handled = [], 0, 0
+    for info in infos:
+        names = {id_to_name.get(lid, "") for lid in info.get("label_ids", set())}
+        if names & cat_label_names:
+            skipped_labeled += 1
+            continue
+        if info.get("last_from_owner"):
+            skipped_handled += 1
+            continue
+        to_judge.append(info)
+    return to_judge, skipped_labeled, skipped_handled
+
+
+def _run_label_only(cfg, me, window_days, chunk):
+    """Label-only backfill: classify recent inbox mail and apply category labels to
+    keepers. Never archives. Light: bounded window, skips already-labeled and
+    owner-handled threads (no Haiku call for those), batched classification."""
+    cat_label_names = _known_category_label_names()
+    # One labels.list for the whole run to resolve thread label ids -> names.
+    label_data = iz.gws(cfg, ["gmail", "users", "labels", "list",
+                              "--params", json.dumps({"userId": "me"})])
+    id_to_name = {l["id"]: l["name"] for l in (label_data.get("labels") or [])}
+
+    tids = _thread_ids_q(cfg, f"in:inbox newer_than:{window_days}d")
+    infos = [i for i in (_thread_info(cfg, tid, me) for tid in tids) if i]
+    to_judge, skipped_labeled, skipped_handled = _backfill_partition(
+        infos, cat_label_names, id_to_name)
+
+    for c in to_judge:
+        c["replied_before"] = _replied_before(cfg, c["last_email"])
+
+    labeled = 0
+    for i in range(0, len(to_judge), chunk):
+        batch = to_judge[i:i + chunk]
+        verdict = _classify(batch)
+        for j, c in enumerate(batch):
+            v = verdict.get(str(j), {})
+            if isinstance(v, dict) and v.get("decision") == "keep" and v.get("category"):
+                apply_category(cfg, c["id"], v["category"])
+                labeled += 1
+
+    return {"mode": "label-only", "window_days": window_days,
+            "considered": len(infos), "skipped_already_labeled": skipped_labeled,
+            "skipped_handled": skipped_handled, "labeled": labeled}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("config_dir")
@@ -334,12 +400,22 @@ def main():
     ap.add_argument("--chunk", type=int, default=50)
     ap.add_argument("--grace-days", type=int, default=2,
                     help="protect mail newer than N days from review (0 = review everything)")
+    ap.add_argument("--label-only", action="store_true",
+                    help="don't archive; just apply category labels to recent keepers")
+    ap.add_argument("--window-days", type=int, default=30,
+                    help="label-only: only consider inbox mail newer than N days")
     a = ap.parse_args()
 
     try:
         me = du._profile_email(a.config_dir)
     except Exception:
         me = a.account_label
+
+    if a.label_only:
+        result = _run_label_only(a.config_dir, me, a.window_days, a.chunk)
+        result["account"] = a.account_label
+        print(json.dumps(result, ensure_ascii=False))
+        return
 
     tids = _thread_ids(a.config_dir, a.grace_days)
     infos = []
@@ -392,5 +468,25 @@ def main():
     print(json.dumps(result, ensure_ascii=False))
 
 
+def _demo():
+    """Offline self-check for the backfill partition: --self-check, no network."""
+    id_to_name = {"L1": "✉️ Needs reply", "L2": "INBOX", "L3": "⏳ Waiting on others"}
+    cat_label_names = {"✉️ Needs reply", "⏳ Waiting on others"}
+    infos = [
+        {"id": "a", "label_ids": {"L1", "L2"}, "last_from_owner": False},  # already labeled
+        {"id": "b", "label_ids": {"L2"}, "last_from_owner": True},         # owner handled
+        {"id": "c", "label_ids": {"L2"}, "last_from_owner": False},        # needs classify
+        {"id": "d", "label_ids": set(), "last_from_owner": False},         # needs classify
+    ]
+    to_judge, labeled, handled = _backfill_partition(infos, cat_label_names, id_to_name)
+    assert [c["id"] for c in to_judge] == ["c", "d"], to_judge
+    assert labeled == 1, labeled
+    assert handled == 1, handled
+    print("review_open_loops self-check OK")
+
+
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) == 2 and sys.argv[1] == "--self-check":
+        _demo()
+    else:
+        main()

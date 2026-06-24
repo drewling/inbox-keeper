@@ -27,7 +27,7 @@ Recovery label: each sweep uses "🗄️ Auto-Archived <YYYY-MM-DD>" so every ru
 independently undoable. Override with --recovery-label to use a custom label.
 Set env var SWEEP_DATE=YYYY-MM-DD to force a specific date (useful for testing).
 """
-import argparse, json, os, subprocess, sys
+import argparse, json, os, re, subprocess, sys
 from datetime import date
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -88,11 +88,16 @@ def _thread_ids(config_dir, q):
 
 
 def _inbox_messages(config_dir):
-    """All inbox messages as (msg_id, thread_id) pairs (paginated).
+    """All inbox messages as (msg_id, thread_id) pairs (paginated)."""
+    return _inbox_messages_q(config_dir, "in:inbox")
+
+
+def _inbox_messages_q(config_dir, q):
+    """Messages matching a query as (msg_id, thread_id) pairs (paginated).
     Raises on subprocess failure or API error. Raises if output is unparseable."""
     pairs = []
     r = subprocess.run(["gws", "gmail", "users", "messages", "list",
-                        "--params", json.dumps({"userId": "me", "q": "in:inbox", "maxResults": 500}),
+                        "--params", json.dumps({"userId": "me", "q": q, "maxResults": 500}),
                         "--page-all", "--page-limit", "500"],
                        capture_output=True, text=True, env=du._env(config_dir))
     if r.returncode != 0:
@@ -225,6 +230,34 @@ def _dated_label(user_label):
     else:
         today = date.today().isoformat()
     return f"{user_label} {today}"
+
+
+_DATE_RE = re.compile(r"^\d{4}/\d{2}/\d{2}$")
+
+
+def archive_before(config_dir, before_date):
+    """Reversibly archive every inbox thread older than before_date (Gmail
+    'before:YYYY/MM/DD'), except high-stakes mail: starred, '⚡ Action', and live
+    sign/pay/legal (PROTECT_PATTERNS). The before: bound handles recency, so there's
+    no grace window. Archiving = remove INBOX + add a dated recovery label, so the
+    whole operation is one-query undoable. Returns {archived, recovery_label}."""
+    if not _DATE_RE.match(before_date or ""):
+        raise ValueError(f"before_date must be YYYY/MM/DD, got {before_date!r}")
+
+    protect = set()
+    protect |= _thread_ids(config_dir, "in:inbox is:starred")
+    protect |= _thread_ids(config_dir, 'in:inbox label:"⚡ Action"')
+    protect |= _thread_ids(config_dir, PROTECT_PATTERNS)
+
+    pairs = _inbox_messages_q(config_dir, f"in:inbox before:{before_date}")
+    archive_ids = [mid for mid, tid in pairs if tid not in protect]
+    if not archive_ids:
+        return {"archived": 0, "recovery_label": None}
+
+    recovery = _dated_label(_BASE_LABEL)
+    lid = _ensure_label(config_dir, recovery)
+    applied = _batch_modify(config_dir, archive_ids, add_ids=[lid], remove_ids=["INBOX"])
+    return {"archived": applied, "recovery_label": recovery}
 
 
 def main():

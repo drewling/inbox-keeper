@@ -222,6 +222,17 @@ struct LabelInfo: Decodable, Identifiable {
     }
 }
 
+// User-controllable timing settings (persisted server-side in app/settings.json).
+struct Settings: Decodable {
+    var graceDays: Int = 0
+    enum K: String, CodingKey { case graceDays }
+    init() {}
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: K.self)
+        graceDays = try c.decodeIfPresent(Int.self, forKey: .graceDays) ?? 0
+    }
+}
+
 // A loop flattened with its owning account, for the unified "waiting on you" list.
 struct LoopRow: Identifiable {
     let loop: Loop
@@ -270,6 +281,21 @@ struct KeeperAPI {
     @discardableResult func addAccount() async throws -> Int { try await startJob("/api/add-account", [:]) }
     @discardableResult func refresh() async throws -> Int { try await startJob("/api/refresh", [:]) }
 
+    /// Label-only backfill: sort the last `windowDays` of inbox mail into categories.
+    /// `slug` nil = all accounts. Never archives.
+    @discardableResult func populateLabels(slug: String?, windowDays: Int) async throws -> Int {
+        var body: [String: Any] = ["window_days": windowDays]
+        if let slug { body["slug"] = slug }
+        return try await startJob("/api/labels/populate", body)
+    }
+
+    /// Reversibly archive inbox mail before `before` (YYYY/MM/DD). `slug` nil = all.
+    @discardableResult func archiveBefore(slug: String?, before: String) async throws -> Int {
+        var body: [String: Any] = ["before": before]
+        if let slug { body["slug"] = slug }
+        return try await startJob("/api/archive-before", body)
+    }
+
     // MARK: synchronous mutations
     func dismiss(_ loop: Loop, slug: String) async throws -> String {
         let body: [String: Any] = [
@@ -316,6 +342,12 @@ struct KeeperAPI {
 
     func saveCategories(_ cats: [Category]) async throws {
         _ = try await sendJSON("/api/categories", method: "PUT", body: ["categories": cats.map(\.json)])
+    }
+
+    /// Timing settings (grace window). Read/written server-side.
+    func settings() async throws -> Settings { try await get("/api/settings") }
+    func saveSettings(graceDays: Int) async throws {
+        _ = try await sendJSON("/api/settings", method: "PUT", body: ["grace_days": graceDays])
     }
 
     /// Delete a learned preference and suppress it so it's never re-learned.

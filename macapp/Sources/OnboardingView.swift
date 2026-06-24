@@ -81,6 +81,78 @@ struct OnboardingView: View {
     }
 }
 
+// One-time, skippable first-run step: clear the backlog so the keeper starts from a
+// calm inbox. Reversible (lands in Undo). Same glass language as OnboardingView.
+struct BacklogStep: View {
+    @EnvironmentObject var m: KeeperModel
+    @State private var beforeDate = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+    private static let apiFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/MM/dd"; return f
+    }()
+    private static let humanFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateStyle = .medium; return f
+    }()
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 30)
+
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .fill(LinearGradient(colors: [Paper.accentHi, Paper.accent], startPoint: .top, endPoint: .bottom))
+                .frame(width: 52, height: 52)
+                .overlay(Image(systemName: "archivebox")
+                    .font(.system(size: 23, weight: .semibold)).foregroundStyle(Color(0.99, 0.99, 1.0)))
+                .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .strokeBorder(.white.opacity(0.28), lineWidth: 0.75))
+                .shadow(color: Paper.accent.opacity(0.45), radius: 12, y: 4)
+
+            Text("Start from a calm inbox")
+                .font(.system(size: 19, weight: .semibold)).kerning(-0.2).padding(.top, 16)
+            Text("Optionally archive everything older than a date you choose, so the keeper only weighs what’s recent. Nothing is deleted — it’s one tap to undo.")
+                .font(.system(size: 13)).foregroundStyle(Paper.ink3)
+                .multilineTextAlignment(.center).frame(maxWidth: 320).padding(.top, 6)
+
+            VStack(spacing: 12) {
+                HStack(spacing: 10) {
+                    Text("Archive everything before").font(.system(size: 12.5)).foregroundStyle(Paper.ink2)
+                    DatePicker("", selection: $beforeDate, in: ...Date(), displayedComponents: .date)
+                        .datePickerStyle(.field).labelsHidden().fixedSize()
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: 9) {
+                    Image(systemName: "checkmark.shield").font(.system(size: 11)).foregroundStyle(Paper.clear)
+                    Text("Starred, flagged, and live sign/pay/legal mail is always kept.")
+                        .font(.system(size: 11)).foregroundStyle(Paper.ink4)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+            }
+            .padding(16).glassSurface(13).frame(maxWidth: 340).padding(.top, 20)
+
+            Spacer(minLength: 18)
+
+            Button {
+                m.archiveBefore(before: Self.apiFmt.string(from: beforeDate))
+                m.dismissBacklog()
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "archivebox").font(.system(size: 12, weight: .bold))
+                    Text("Archive before \(Self.humanFmt.string(from: beforeDate))")
+                }
+            }
+            .buttonStyle(PrimaryButtonStyle(enabled: !m.isBusy)).disabled(m.isBusy)
+
+            Button("Skip for now") { m.dismissBacklog() }
+                .buttonStyle(.plain).font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Paper.ink3).padding(.top, 12)
+
+            Spacer(minLength: 24)
+        }
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
 private struct TrustRow: View {
     let symbol: String; let text: String
     var body: some View {
