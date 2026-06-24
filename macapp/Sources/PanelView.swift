@@ -127,7 +127,8 @@ private struct TopBar: View {
                     .frame(width: 26, height: 26)
                     .contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton)
+            .menuStyle(.button)
+            .buttonStyle(.plain)     // no accent-filled highlight while the menu is open
             .menuIndicator(.hidden)
             .fixedSize()
             .focusEffectDisabled()   // no blue focus ring when the panel auto-focuses it on open
@@ -640,11 +641,14 @@ private struct DailyRoutineSection: View {
                            "When zero automatically runs. Changes take effect the next time the launch agent reschedules (if it's installed).")
 
             // ── When it runs ──────────────────────────────────────────────
-            VStack(alignment: .leading, spacing: 10) {
+            // Three clean rows: time · days · quick presets. Each label is fixed
+            // width so it never gets squeezed into a vertical char stack.
+            VStack(alignment: .leading, spacing: 11) {
 
-                // Time row: hour stepper + colon + minute stepper
+                // Time row
                 HStack(spacing: 8) {
                     Text("Run at").font(.system(size: 12.5)).foregroundStyle(Paper.ink2)
+                        .fixedSize()
                     TimeStepperField(value: $m.scheduleHour, range: 0...23,
                                      format: { String(format: "%02d", $0) })
                     Text(":").font(.system(size: 13, weight: .semibold)).foregroundStyle(Paper.ink2)
@@ -652,17 +656,6 @@ private struct DailyRoutineSection: View {
                                      format: { String(format: "%02d", $0) },
                                      step: 5)
                     Spacer(minLength: 0)
-                    // Preset shortcuts
-                    Button("Weekdays") {
-                        m.scheduleDays = [1, 2, 3, 4, 5]; m.saveSchedule()
-                    }
-                    .buttonStyle(GhostButtonStyle())
-                    .lineLimit(1).fixedSize(horizontal: true, vertical: false)
-                    Button("Every day") {
-                        m.scheduleDays = [0, 1, 2, 3, 4, 5, 6]; m.saveSchedule()
-                    }
-                    .buttonStyle(GhostButtonStyle())
-                    .lineLimit(1).fixedSize(horizontal: true, vertical: false)
                 }
                 .onChange(of: m.scheduleHour)   { _, _ in m.saveSchedule() }
                 .onChange(of: m.scheduleMinute) { _, _ in m.saveSchedule() }
@@ -670,6 +663,7 @@ private struct DailyRoutineSection: View {
                 // Days-of-week pills
                 HStack(spacing: 5) {
                     Text("On").font(.system(size: 12.5)).foregroundStyle(Paper.ink2)
+                        .fixedSize()
                     HStack(spacing: 4) {
                         ForEach(0..<7, id: \.self) { day in
                             DayPill(label: Self.dayLabels[day],
@@ -683,6 +677,21 @@ private struct DailyRoutineSection: View {
                             }
                         }
                     }
+                    Spacer(minLength: 0)
+                }
+
+                // Quick presets on their own row so nothing crowds the time/day rows.
+                HStack(spacing: 8) {
+                    Button("Weekdays") {
+                        m.scheduleDays = [1, 2, 3, 4, 5]; m.saveSchedule()
+                    }
+                    .buttonStyle(GhostButtonStyle())
+                    .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                    Button("Every day") {
+                        m.scheduleDays = [0, 1, 2, 3, 4, 5, 6]; m.saveSchedule()
+                    }
+                    .buttonStyle(GhostButtonStyle())
+                    .lineLimit(1).fixedSize(horizontal: true, vertical: false)
                     Spacer(minLength: 0)
                 }
             }
@@ -1032,8 +1041,10 @@ private struct CategoryToken: View {
         )
         .scaleEffect(pulse ? 1.10 : 1)
         .animation(Motion.pop, value: pulse)
+        // Pulse only on a committed pick (emoji choice, or a swatch tap via the
+        // colour picker's onChange) — NOT on every hex value as a slider is dragged,
+        // which made the token (and the popover anchored to it) jitter continuously.
         .onChange(of: emoji) { _, _ in triggerPulse() }
-        .onChange(of: hex)   { _, _ in triggerPulse() }
     }
 
     private func triggerPulse() {
@@ -1051,10 +1062,226 @@ private struct CuteEmojiPicker: View {
     let tint: Color
     var onChange: (() -> Void)? = nil
     @State private var open = false
-    private static let choices = [
-        "🏷️","✉️","💌","📨","📥","💬","⏳","⌛️","🕐","📅","🗓️","⏰",
-        "🔖","📌","📎","⚡️","🔥","🚨","⭐️","✅","☑️","🔔","🧾","💡",
-        "🎯","🚀","☕️","🌱","🍀","🌸","🫶","🤝","🧠","🎉","❤️","👀"]
+    @State private var searchText = ""
+
+    // Curated front-page: tasteful spread for email-triage labels, shown when search is empty.
+    private static let suggested = [
+        "🏷️","✉️","💌","📨","📥","💬","⏳","⌛️","📅","🗓️","⏰","🔔",
+        "🔖","📌","📎","⚡️","🔥","🚨","⭐️","✅","☑️","🧾","💡","🎯",
+        "🚀","☕️","🌱","🌸","🫶","🤝","🧠","🎉","❤️","👀","💼","🗂️",
+        "📝","🔑","🛑","💸"]
+
+    // Full searchable dataset: ~200 emoji with lowercase keyword arrays.
+    private static let dataset: [(emoji: String, keywords: [String])] = [
+        // Faces / smileys
+        ("😀", ["grin","happy","smile","joy"]),
+        ("😂", ["laugh","tears","lol","funny"]),
+        ("🥲", ["smile","tear","bittersweet"]),
+        ("😊", ["happy","blush","warm","smile"]),
+        ("😍", ["love","heart eyes","adore"]),
+        ("🤩", ["star","excited","wow","amazing"]),
+        ("😎", ["cool","sunglasses","confident"]),
+        ("🤔", ["think","question","hmm","wonder"]),
+        ("😬", ["awkward","grimace","nervous"]),
+        ("😴", ["sleep","tired","zzz","rest"]),
+        ("😤", ["frustrated","huff","annoyed"]),
+        ("😡", ["angry","mad","rage","upset"]),
+        ("🥺", ["sad","plead","beg","puppy"]),
+        ("😭", ["cry","sob","sad","tears"]),
+        ("🤯", ["mind blown","shocked","wow"]),
+        ("🫠", ["melt","overwhelmed","stress"]),
+        ("🙃", ["silly","upside down","ironic"]),
+        ("😇", ["angel","good","innocent","halo"]),
+        ("🥳", ["party","celebrate","fun"]),
+        // Hands / people
+        ("👍", ["thumbs up","good","ok","approve","yes"]),
+        ("👎", ["thumbs down","no","reject","bad"]),
+        ("👋", ["wave","hello","hi","bye"]),
+        ("🙌", ["praise","yay","celebrate","hands"]),
+        ("👏", ["clap","applause","well done"]),
+        ("🤝", ["handshake","deal","agree","partner"]),
+        ("🙏", ["please","thanks","pray","gratitude"]),
+        ("🫶", ["love","heart hands","care"]),
+        ("✊", ["fist","solidarity","power","fight"]),
+        ("👀", ["eyes","look","watch","see"]),
+        ("🧠", ["brain","think","smart","idea","intelligence"]),
+        ("💪", ["strong","muscle","power","flex"]),
+        ("👤", ["person","user","account","profile"]),
+        ("🧑‍💻", ["developer","coder","tech","programmer"]),
+        // Hearts
+        ("❤️", ["heart","love","red","care"]),
+        ("🧡", ["orange","heart","love"]),
+        ("💛", ["yellow","heart","happy","love"]),
+        ("💚", ["green","heart","nature","love"]),
+        ("💙", ["blue","heart","calm","love"]),
+        ("💜", ["purple","heart","love"]),
+        ("🖤", ["black","heart","dark"]),
+        ("🤍", ["white","heart","pure","love"]),
+        ("💔", ["broken heart","sad","breakup","loss"]),
+        ("💕", ["hearts","love","affection","double"]),
+        ("❤️‍🔥", ["heart fire","passion","intense","love"]),
+        // Nature / animals / plants
+        ("🌱", ["plant","grow","seedling","nature","green"]),
+        ("🌿", ["herb","leaf","nature","green"]),
+        ("🍀", ["clover","luck","lucky","four leaf"]),
+        ("🌸", ["flower","cherry blossom","spring","pink"]),
+        ("🌻", ["sunflower","sun","happy","bright"]),
+        ("🌊", ["wave","ocean","sea","water"]),
+        ("⛅", ["cloud","partly cloudy","weather"]),
+        ("🌙", ["moon","night","dark","sleep"]),
+        ("☀️", ["sun","sunny","bright","day","warm"]),
+        ("🐛", ["bug","insect","error","issue"]),
+        ("🐝", ["bee","busy","work","honey"]),
+        ("🦋", ["butterfly","transform","change","growth"]),
+        ("🐢", ["turtle","slow","steady","patient"]),
+        ("🦊", ["fox","clever","crafty"]),
+        ("🐱", ["cat","cute","meow","pet"]),
+        // Food / drink
+        ("☕️", ["coffee","cafe","morning","drink","warm"]),
+        ("🍵", ["tea","green tea","relax","drink"]),
+        ("🍺", ["beer","drink","celebrate","friday"]),
+        ("🍕", ["pizza","food","lunch"]),
+        ("🍎", ["apple","fruit","health","red"]),
+        ("🍇", ["grape","fruit","purple"]),
+        ("🎂", ["cake","birthday","celebrate"]),
+        ("🍩", ["donut","sweet","treat"]),
+        // Objects / tools / tech
+        ("💡", ["idea","light","bright","bulb","insight"]),
+        ("🔑", ["key","access","unlock","password","security"]),
+        ("🔒", ["lock","secure","private","safety"]),
+        ("🔓", ["unlock","open","access","release"]),
+        ("🛠️", ["tool","fix","build","repair","wrench"]),
+        ("⚙️", ["gear","setting","config","cog"]),
+        ("🧩", ["puzzle","piece","integrate","fit"]),
+        ("📦", ["box","package","ship","deliver"]),
+        ("🗂️", ["folder","file","organize","category"]),
+        ("📁", ["folder","files","directory"]),
+        ("📂", ["open folder","files","browse"]),
+        ("📝", ["note","write","edit","memo","task"]),
+        ("📋", ["clipboard","copy","list","notes"]),
+        ("📊", ["chart","graph","data","analytics"]),
+        ("📈", ["chart up","growth","increase","trend"]),
+        ("📉", ["chart down","decline","decrease","drop"]),
+        ("🖥️", ["monitor","computer","desktop","screen"]),
+        ("💻", ["laptop","computer","code","work"]),
+        ("📱", ["phone","mobile","device","app"]),
+        ("🖨️", ["printer","print","paper"]),
+        ("⌨️", ["keyboard","type","input"]),
+        ("🖱️", ["mouse","cursor","click"]),
+        ("💾", ["floppy","save","disk","storage"]),
+        ("💿", ["disc","cd","data"]),
+        ("🔌", ["plug","power","connect","cable"]),
+        ("🔋", ["battery","power","charge","energy"]),
+        ("🧲", ["magnet","attract","pull","stick"]),
+        ("⚡️", ["lightning","fast","electric","power","urgent"]),
+        ("🔦", ["flashlight","torch","light","dark"]),
+        ("🕯️", ["candle","light","soft","warm"]),
+        // Mail / communication
+        ("✉️", ["email","mail","letter","envelope","message"]),
+        ("💌", ["love letter","mail","message","heart","email"]),
+        ("📨", ["incoming","mail","email","receive","envelope"]),
+        ("📩", ["outgoing","mail","email","send"]),
+        ("📥", ["inbox","tray","mail","incoming","receive"]),
+        ("📤", ["outbox","send","mail","out"]),
+        ("📬", ["mailbox","mail","letter","post"]),
+        ("📭", ["mailbox empty","empty","no mail"]),
+        ("💬", ["chat","message","talk","comment","reply"]),
+        ("💭", ["thought","bubble","thinking","idea"]),
+        ("🗣️", ["speak","talk","voice","announce"]),
+        ("📢", ["announce","megaphone","loud","broadcast"]),
+        ("📣", ["cheer","megaphone","announce"]),
+        ("🔔", ["bell","notification","alert","remind"]),
+        ("🔕", ["no bell","mute","silent","quiet"]),
+        ("📡", ["satellite","antenna","broadcast","signal"]),
+        // Symbols / status / flags
+        ("✅", ["check","done","complete","tick","yes","success"]),
+        ("☑️", ["checkbox","check","done","tick"]),
+        ("❌", ["cross","wrong","no","error","delete","cancel"]),
+        ("⛔", ["stop","no","forbidden","block"]),
+        ("🚫", ["forbidden","no","block","ban"]),
+        ("⚠️", ["warning","caution","alert","attention"]),
+        ("🚨", ["alert","alarm","urgent","emergency","siren"]),
+        ("🛑", ["stop","halt","red","danger","block"]),
+        ("💯", ["perfect","100","score","all","complete"]),
+        ("🔴", ["red","dot","circle","stop","danger"]),
+        ("🟠", ["orange","dot","circle","warning"]),
+        ("🟡", ["yellow","dot","circle","caution"]),
+        ("🟢", ["green","dot","circle","go","ok","success"]),
+        ("🔵", ["blue","dot","circle","info"]),
+        ("⭐️", ["star","favorite","highlight","important","rate"]),
+        ("🌟", ["star","glow","shine","excellent"]),
+        ("💫", ["sparkle","star","spin","dizzy"]),
+        ("✨", ["sparkle","shine","magic","new","clean"]),
+        ("🎯", ["target","goal","aim","focus","hit","bullseye"]),
+        ("🚩", ["flag","mark","issue","problem","red flag"]),
+        ("🏁", ["finish","done","complete","race","end"]),
+        ("🏷️", ["tag","label","category","mark","price"]),
+        ("🔖", ["bookmark","save","mark","page"]),
+        ("📌", ["pin","mark","location","important","push pin"]),
+        ("📍", ["pin","location","map","place","here"]),
+        ("📎", ["clip","attach","paperclip","link","bind"]),
+        ("🖇️", ["linked clips","attach","paperclips"]),
+        ("🗝️", ["key","old","access","unlock","vintage"]),
+        ("🪄", ["magic","wand","spell","transform"]),
+        ("🎪", ["circus","event","show","fun"]),
+        ("🎭", ["theater","drama","masks","performance"]),
+        // Time / calendar
+        ("⏳", ["hourglass","wait","time","pending","loading"]),
+        ("⌛️", ["hourglass done","time up","wait","end"]),
+        ("⏰", ["alarm","wake","ring","alert","time"]),
+        ("⏱️", ["timer","stopwatch","measure","time","speed"]),
+        ("⏲️", ["timer","clock","countdown"]),
+        ("🕐", ["clock","one","time","hour"]),
+        ("📅", ["calendar","date","schedule","plan","event"]),
+        ("🗓️", ["calendar","date","planner","schedule"]),
+        ("📆", ["calendar","date","event","day"]),
+        // Activity / celebration / sports
+        ("🎉", ["party","celebrate","confetti","hurray","fun"]),
+        ("🎊", ["celebration","party","confetti","pop"]),
+        ("🏆", ["trophy","win","award","champion","best"]),
+        ("🥇", ["gold","medal","first","win","champion"]),
+        ("🎖️", ["medal","honor","award","achievement"]),
+        ("🎗️", ["ribbon","awareness","support","cause"]),
+        ("🏅", ["medal","award","sport","compete"]),
+        ("🎮", ["game","play","controller","fun","video"]),
+        ("🧘", ["meditate","calm","yoga","relax","peace"]),
+        ("🏃", ["run","fast","quick","jog","rush"]),
+        ("🚀", ["rocket","launch","ship","fast","go","start","blast"]),
+        ("🛸", ["ufo","alien","spaceship","fly"]),
+        ("✈️", ["plane","travel","fly","trip","flight"]),
+        ("🚂", ["train","commute","travel","rail"]),
+        // Weather
+        ("🌤️", ["partly cloudy","sun","cloud","weather"]),
+        ("🌧️", ["rain","rainy","wet","weather","storm"]),
+        ("⛈️", ["storm","thunder","lightning","rain","weather"]),
+        ("🌈", ["rainbow","color","hope","bright","after storm"]),
+        ("❄️", ["snow","cold","winter","freeze","chill"]),
+        ("🔥", ["fire","hot","flame","trending","urgent","burn"]),
+        ("💧", ["water","drop","rain","hydrate","blue"]),
+        // Finance / work
+        ("💰", ["money","cash","bag","rich","funds"]),
+        ("💸", ["money","pay","spend","flying","cost","expense"]),
+        ("💳", ["card","credit","pay","transaction"]),
+        ("🧾", ["receipt","invoice","bill","payment","record"]),
+        ("📜", ["scroll","document","contract","old","paper"]),
+        ("📃", ["document","page","paper","sheet"]),
+        ("📄", ["document","file","paper","page","text"]),
+        ("💼", ["briefcase","work","business","office","job"]),
+        ("🖊️", ["pen","write","sign","edit"]),
+        ("✏️", ["pencil","draw","write","edit","sketch"]),
+        ("📏", ["ruler","measure","straight","scale"]),
+        ("🗑️", ["trash","delete","bin","remove","waste"]),
+    ]
+
+    private var results: [String] {
+        if searchText.isEmpty { return Self.suggested }
+        let q = searchText.lowercased()
+        return Self.dataset.compactMap { entry in
+            (entry.emoji.lowercased().contains(q) ||
+             entry.keywords.contains(where: { $0.contains(q) })) ? entry.emoji : nil
+        }
+    }
+
     var body: some View {
         Button { open.toggle() } label: {
             Text(emoji.isEmpty ? "🏷️" : emoji)
@@ -1063,33 +1290,80 @@ private struct CuteEmojiPicker: View {
         }
         .buttonStyle(.plain).help("Pick an emoji")
         .popover(isPresented: $open, arrowEdge: .bottom) {
-            VStack(spacing: 10) {
-                LazyVGrid(columns: Array(repeating: GridItem(.fixed(30), spacing: 4), count: 8), spacing: 4) {
-                    ForEach(Self.choices, id: \.self) { e in
-                        Button {
-                            emoji = e
-                            onChange?()
-                            open = false
-                        } label: {
-                            Text(e).font(.system(size: 18)).frame(width: 30, height: 30)
-                                .background(RoundedRectangle(cornerRadius: 7)
-                                    .fill(e == emoji ? Paper.accent.opacity(0.28) : .clear))
-                        }.buttonStyle(.plain)
-                    }
-                }
-                Divider().overlay(Paper.hairline.opacity(0.12))
+            VStack(spacing: 8) {
+                // Search field
                 HStack(spacing: 6) {
-                    Text("Or type:").font(.system(size: 11)).foregroundStyle(Paper.ink3)
-                    TextField("🏷️", text: $emoji).textFieldStyle(.plain)
-                        .multilineTextAlignment(.center).frame(width: 44)
-                        .padding(.vertical, 4)
-                        .background(RoundedRectangle(cornerRadius: 6).fill(Paper.sunken.opacity(0.3)))
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11)).foregroundStyle(Paper.ink4)
+                    TextField("Search emoji", text: $searchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Paper.ink)
+                }
+                .padding(.horizontal, 9).padding(.vertical, 6)
+                .background(RoundedRectangle(cornerRadius: 8)
+                    .fill(Paper.sunken.opacity(0.32))
+                    .overlay(RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Paper.hairline.opacity(0.14), lineWidth: 0.5)))
+
+                // Emoji grid
+                let hits = results
+                if hits.isEmpty {
+                    Text("No matches")
+                        .font(.system(size: 12)).foregroundStyle(Paper.ink4)
+                        .frame(maxWidth: .infinity).padding(.vertical, 20)
+                } else {
+                    ScrollView {
+                        LazyVGrid(
+                            columns: Array(repeating: GridItem(.fixed(32), spacing: 3), count: 8),
+                            spacing: 3
+                        ) {
+                            ForEach(hits, id: \.self) { e in
+                                EmojiCell(e: e, selected: e == emoji) {
+                                    emoji = e
+                                    onChange?()
+                                    open = false
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 220)
                 }
             }
-            .padding(14).frame(width: 300)
+            .padding(12).frame(width: 300)
             .background(Paper.paper)
             .environment(\.colorScheme, .dark)
         }
+        .onChange(of: open) { _, isOpen in
+            if !isOpen { searchText = "" }
+        }
+    }
+}
+
+private struct EmojiCell: View {
+    let e: String
+    let selected: Bool
+    let action: () -> Void
+    @State private var hovering = false
+    var body: some View {
+        Button(action: action) {
+            Text(e).font(.system(size: 19))
+                .frame(width: 32, height: 32)
+                .background(
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(selected
+                            ? Paper.accent.opacity(0.30)
+                            : hovering ? Paper.accent.opacity(0.12) : .clear)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7)
+                        .strokeBorder(selected ? Paper.accentSoft.opacity(0.55) : .clear, lineWidth: 1)
+                )
+                .scaleEffect(hovering ? 1.12 : 1)
+                .animation(Motion.pop, value: hovering)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }
 
@@ -1758,7 +2032,10 @@ private struct ActionBar: View {
                             .font(.system(size: 12, weight: .semibold))
                             .transition(.opacity.combined(with: .scale(scale: 0.7)))
                     }
-                    Text(m.isBusy ? (m.job?.message.isEmpty == false ? m.job!.message : "Keeping…") : "Run zero now")
+                    // The live progress message lives in the status line (left) only;
+                    // the button just shows a short, fixed working label so the text
+                    // never appears twice in this bar.
+                    Text(m.isBusy ? "Working…" : "Run zero now")
                         .contentTransition(.opacity)
                 }
                 .animation(.easeOut(duration: 0.22), value: m.isBusy)

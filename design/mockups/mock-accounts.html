@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=444">
+  <title>Zero -- Accounts Panel</title>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 444px;
+      margin: 0 auto;
+      min-height: 100vh;
+      background: #0F0E0D;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 32px;
+    }
+
+    .panel {
+      width: 420px;
+      background: #1E1C1A;
+      border-radius: 17px;
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      box-shadow:
+        0 30px 80px rgba(0, 0, 0, 0.7),
+        0 2px 8px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .panel::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 50%;
+      background: linear-gradient(to bottom, rgba(255, 255, 255, 0.04), transparent);
+      pointer-events: none;
+      border-radius: 17px 17px 0 0;
+      z-index: 0;
+    }
+
+    /* Beak/arrow at top center */
+    .beak {
+      position: absolute;
+      top: -7px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 14px;
+      height: 7px;
+      overflow: visible;
+      z-index: 10;
+    }
+
+    .beak::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 7px solid transparent;
+      border-right: 7px solid transparent;
+      border-bottom: 7px solid rgba(255, 255, 255, 0.09);
+    }
+
+    .beak::after {
+      content: '';
+      position: absolute;
+      top: 1px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 6px solid transparent;
+      border-right: 6px solid transparent;
+      border-bottom: 6px solid #1E1C1A;
+    }
+
+    /* All direct children need z-index 1 to sit above ::before */
+    .top-bar,
+    .segmented-nav,
+    .divider,
+    .account-list,
+    .add-account {
+      position: relative;
+      z-index: 1;
+    }
+
+    /* TOP BAR */
+    .top-bar {
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .app-icon {
+      width: 22px;
+      height: 22px;
+      border-radius: 5px;
+      background: #1A73E8;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .app-icon span {
+      font-size: 13px;
+      font-weight: 700;
+      color: white;
+      line-height: 1;
+    }
+
+    .wordmark {
+      font-size: 15px;
+      font-weight: 600;
+      color: #F0EFED;
+      letter-spacing: -0.3px;
+      flex-shrink: 0;
+    }
+
+    .spacer {
+      flex: 1;
+    }
+
+    .avatar-stack {
+      display: flex;
+      align-items: center;
+    }
+
+    .avatar-sm {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      border: 1.5px solid #1E1C1A;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 9px;
+      font-weight: 700;
+      color: white;
+      flex-shrink: 0;
+    }
+
+    .avatar-sm:not(:first-child) {
+      margin-left: -6px;
+    }
+
+    .overflow-glyph {
+      font-size: 18px;
+      color: #9A9894;
+      margin-left: 10px;
+      line-height: 1;
+      letter-spacing: 1px;
+    }
+
+    /* SEGMENTED NAV */
+    .segmented-nav {
+      margin: 0 12px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 9px;
+      padding: 3px;
+      display: flex;
+      gap: 2px;
+    }
+
+    .seg-item {
+      flex: 1;
+      font-size: 12px;
+      font-weight: 400;
+      color: #9A9894;
+      padding: 5px 10px;
+      text-align: center;
+      border-radius: 7px;
+      white-space: nowrap;
+    }
+
+    .seg-item.active {
+      background: rgba(255, 255, 255, 0.12);
+      color: #F0EFED;
+      font-weight: 500;
+    }
+
+    /* DIVIDER */
+    .divider {
+      height: 1px;
+      background: rgba(255, 255, 255, 0.07);
+      margin-top: 8px;
+      margin-bottom: 4px;
+    }
+
+    /* ACCOUNT LIST */
+    .account-list {
+      /* no extra padding, rows handle their own */
+    }
+
+    .account-row {
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .account-row + .account-row {
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .avatar-lg {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      color: white;
+      flex-shrink: 0;
+    }
+
+    .account-mid {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .account-email {
+      font-size: 13px;
+      font-weight: 500;
+      color: #F0EFED;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .account-right {
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .count-open {
+      font-size: 13px;
+      font-weight: 600;
+      color: #F0EFED;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .count-archived {
+      font-size: 11px;
+      color: #9A9894;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      margin-top: 1px;
+    }
+
+    .row-overflow {
+      font-size: 16px;
+      color: rgba(154, 152, 148, 0.5);
+      margin-left: 10px;
+      letter-spacing: 1px;
+      flex-shrink: 0;
+    }
+
+    /* ADD ACCOUNT */
+    .add-account {
+      margin: 10px 16px 14px;
+      border: 1.5px dashed rgba(255, 255, 255, 0.15);
+      border-radius: 9px;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .add-plus {
+      font-size: 16px;
+      color: #9A9894;
+      line-height: 1;
+    }
+
+    .add-label {
+      font-size: 13px;
+      color: #9A9894;
+    }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <div class="beak"></div>
+
+    <!-- TOP BAR -->
+    <div class="top-bar">
+      <div class="app-icon"><span>&#10003;</span></div>
+      <div class="wordmark">zero</div>
+      <div class="spacer"></div>
+      <div class="avatar-stack">
+        <div class="avatar-sm" style="background: #1A73E8;">T</div>
+        <div class="avatar-sm" style="background: #1E8A4C;">L</div>
+        <div class="avatar-sm" style="background: #D4820A;">A</div>
+        <div class="avatar-sm" style="background: #C0392B;">T</div>
+      </div>
+      <div class="overflow-glyph">&#xB7;&#xB7;&#xB7;</div>
+    </div>
+
+    <!-- SEGMENTED NAV -->
+    <div class="segmented-nav">
+      <div class="seg-item">Open loops</div>
+      <div class="seg-item active">Accounts</div>
+      <div class="seg-item">Undo</div>
+      <div class="seg-item">Settings</div>
+    </div>
+
+    <!-- DIVIDER -->
+    <div class="divider"></div>
+
+    <!-- ACCOUNT LIST -->
+    <div class="account-list">
+
+      <div class="account-row">
+        <div class="avatar-lg" style="background: #1A73E8;">T</div>
+        <div class="account-mid">
+          <div class="account-email">tayo@drewl.com</div>
+        </div>
+        <div class="account-right">
+          <div class="count-open">1 open</div>
+          <div class="count-archived">13,286 archived</div>
+        </div>
+        <div class="row-overflow">&#xB7;&#xB7;&#xB7;</div>
+      </div>
+
+      <div class="account-row">
+        <div class="avatar-lg" style="background: #1E8A4C;">L</div>
+        <div class="account-mid">
+          <div class="account-email">lightstormvisuals@gmail.com</div>
+        </div>
+        <div class="account-right">
+          <div class="count-open">3 open</div>
+          <div class="count-archived">4,784 archived</div>
+        </div>
+        <div class="row-overflow">&#xB7;&#xB7;&#xB7;</div>
+      </div>
+
+      <div class="account-row">
+        <div class="avatar-lg" style="background: #D4820A;">A</div>
+        <div class="account-mid">
+          <div class="account-email">Alexander.onabule@gmail.com</div>
+        </div>
+        <div class="account-right">
+          <div class="count-open">1 open</div>
+          <div class="count-archived">0 archived</div>
+        </div>
+        <div class="row-overflow">&#xB7;&#xB7;&#xB7;</div>
+      </div>
+
+      <div class="account-row">
+        <div class="avatar-lg" style="background: #C0392B;">T</div>
+        <div class="account-mid">
+          <div class="account-email">Tayo.onabule98@gmail.com</div>
+        </div>
+        <div class="account-right">
+          <div class="count-open">1 open</div>
+          <div class="count-archived">426 archived</div>
+        </div>
+        <div class="row-overflow">&#xB7;&#xB7;&#xB7;</div>
+      </div>
+
+    </div>
+
+    <!-- ADD ACCOUNT -->
+    <div class="add-account">
+      <span class="add-plus">+</span>
+      <span class="add-label">Add a Gmail account</span>
+    </div>
+
+  </div>
+</body>
+</html>

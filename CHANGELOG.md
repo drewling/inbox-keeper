@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-06-25
+
+Polish and connect-flow fixes from hands-on testing of 1.5.0.
+
+### Fixed
+
+- **Connecting a Gmail account now actually opens your browser.** With no terminal, the `gws` sign-in helper printed the Google consent URL and waited instead of launching a browser, so "Opening your browser to sign in…" hung forever. zero now reads that URL, opens it for you, and shows a fallback "Open the sign-in page" link. (Verified end to end: a real consent tab opens.)
+- **The action bar no longer repeats itself.** During a run, the live progress message showed both in the button and in the status line beside it. The button now shows a short "Working…" and the live detail appears once, in the status line (which has more room as a result).
+- **Daily-routine layout.** "Run at" no longer collapses into vertical letters; the section is now three clean rows: the run time, the day-of-week pills, and the "Weekdays" / "Every day" presets. The preset pills no longer wrap.
+- **Colour picker sliders.** The Hue/Saturation/Brightness thumbs are vertically centered and track the cursor across the full width without clipping the track ends.
+- **Top-bar menu.** The three-dot overflow menu no longer shows a stray focus ring when the panel opens, nor an accent-filled highlight while open.
+
+### Changed
+
+- Updated the README screenshots to the current 1.5.x panel.
+
 ## [1.5.0] - 2026-06-25
 
 ### Added
@@ -118,7 +134,8 @@ Initial public release.
 - Native macOS 26 Liquid Glass menu-bar app with a popover panel.
 - `.dmg` installer with guided onboarding for first-time setup.
 
-[Unreleased]: https://github.com/drewling/zero/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/drewling/zero/compare/v1.5.1...HEAD
+[1.5.1]: https://github.com/drewling/zero/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/drewling/zero/compare/v1.4.1...v1.5.0
 [1.1.0]: https://github.com/drewling/zero/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/drewling/zero/releases/tag/v1.0.0

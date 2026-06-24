@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=444, initial-scale=1">
+<title>zero -- Settings panel mock</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 444px;
+    margin: 0 auto;
+    background: #0F0E0D;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 32px;
+    padding-bottom: 48px;
+  }
+
+  /* ---- Beak ---- */
+  .beak {
+    position: absolute;
+    top: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 16px;
+    height: 8px;
+    overflow: hidden;
+    z-index: 10;
+  }
+  .beak::after {
+    content: '';
+    display: block;
+    width: 12px;
+    height: 12px;
+    background: #1E1C1A;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 2px;
+    transform: rotate(45deg);
+    margin: 4px auto 0;
+    box-shadow: -1px -1px 0 rgba(255,255,255,0.06);
+  }
+
+  /* ---- Panel ---- */
+  .panel {
+    position: relative;
+    width: 420px;
+    border-radius: 17px;
+    background: #1E1C1A;
+    border: 1px solid rgba(255,255,255,0.09);
+    box-shadow:
+      0 30px 80px rgba(0,0,0,0.7),
+      0 2px 8px rgba(0,0,0,0.4),
+      inset 0 1px 0 rgba(255,255,255,0.08);
+    overflow: hidden;
+  }
+
+  /* Glass sheen */
+  .panel::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 50%;
+    background: linear-gradient(to bottom, rgba(255,255,255,0.04), transparent);
+    pointer-events: none;
+    border-radius: 17px 17px 0 0;
+    z-index: 0;
+  }
+
+  /* All direct children sit above the sheen */
+  .panel > * { position: relative; z-index: 1; }
+
+  /* ---- Top bar ---- */
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 16px;
+  }
+
+  .app-icon {
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
+    background: #1A73E8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 13px;
+    font-weight: 700;
+    color: white;
+    line-height: 1;
+  }
+
+  .wordmark {
+    font-size: 15px;
+    font-weight: 600;
+    color: #F0EFED;
+    letter-spacing: -0.3px;
+  }
+
+  .topbar-spacer { flex: 1; }
+
+  .avatar-stack {
+    display: flex;
+    align-items: center;
+  }
+
+  .avatar {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 700;
+    color: white;
+    border: 1.5px solid #1E1C1A;
+    flex-shrink: 0;
+  }
+  .avatar + .avatar { margin-left: -6px; }
+
+  .av-blue  { background: #1A73E8; }
+  .av-green { background: #1E8A4C; }
+  .av-amber { background: #D4820A; }
+  .av-red   { background: #C0392B; }
+
+  .overflow-glyph {
+    font-size: 18px;
+    color: #9A9894;
+    margin-left: 10px;
+    letter-spacing: -2px;
+    line-height: 1;
+    padding-bottom: 4px;
+  }
+
+  /* ---- Segmented nav ---- */
+  .seg-nav {
+    margin: 0 12px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 9px;
+    padding: 3px;
+    display: flex;
+    gap: 2px;
+  }
+
+  .seg-item {
+    flex: 1;
+    font-size: 12px;
+    padding: 5px 10px;
+    text-align: center;
+    border-radius: 7px;
+    color: #9A9894;
+    font-weight: 400;
+    cursor: default;
+    user-select: none;
+  }
+
+  .seg-item.active {
+    background: rgba(255,255,255,0.12);
+    color: #F0EFED;
+    font-weight: 500;
+  }
+
+  /* ---- Divider ---- */
+  .divider {
+    height: 1px;
+    background: rgba(255,255,255,0.07);
+    margin: 6px 0 0;
+  }
+
+  /* ---- Rules section ---- */
+  .rules-section {
+    padding: 12px 16px 8px;
+  }
+
+  .section-header-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #F0EFED;
+  }
+
+  .section-subtitle {
+    font-size: 11px;
+    color: #9A9894;
+    line-height: 1.45;
+    margin-top: 3px;
+  }
+
+  .policy-box {
+    margin-top: 10px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 10px 12px;
+    overflow-x: auto;
+  }
+
+  .policy-box pre {
+    font-family: "SF Mono", "Menlo", "Monaco", Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.6;
+    color: #C8C6C2;
+    white-space: pre;
+    margin: 0;
+  }
+
+  .policy-comment { color: rgba(154,152,148,0.7); }
+  .policy-text    { color: #C8C6C2; }
+
+  /* ---- Categories section ---- */
+  .categories-section {
+    padding: 10px 16px 8px;
+  }
+
+  .cat-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #9A9894;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  .cat-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .cat-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 20px;
+    padding: 4px 10px 4px 8px;
+  }
+
+  .chip-emoji {
+    font-size: 13px;
+    line-height: 1;
+  }
+
+  .chip-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .chip-name {
+    font-size: 12px;
+    color: #C8C6C2;
+  }
+
+  /* ---- Card base ---- */
+  .card {
+    margin: 0 12px 8px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 11px;
+    padding: 12px 14px;
+  }
+
+  .card-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #9A9894;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  /* ---- Daily routine card ---- */
+  .time-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+
+  .time-label {
+    font-size: 12px;
+    color: #9A9894;
+  }
+
+  .stepper-box {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 5px;
+    padding: 3px 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #F0EFED;
+    font-variant-numeric: tabular-nums;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    min-width: 28px;
+    text-align: center;
+  }
+
+  .time-sep {
+    font-size: 14px;
+    color: #9A9894;
+    line-height: 1;
+    margin-bottom: 1px;
+  }
+
+  .days-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 10px;
+  }
+
+  .days-label {
+    font-size: 12px;
+    color: #9A9894;
+    margin-right: 2px;
+  }
+
+  .day-pill {
+    width: 24px;
+    height: 24px;
+    border-radius: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .day-active {
+    background: #1A73E8;
+    color: white;
+  }
+
+  .day-inactive {
+    background: rgba(255,255,255,0.07);
+    color: #9A9894;
+  }
+
+  .quick-row {
+    display: flex;
+    gap: 6px;
+  }
+
+  .quick-pill {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 20px;
+    padding: 3px 10px;
+    font-size: 11px;
+    color: #9A9894;
+    background: transparent;
+    cursor: default;
+    user-select: none;
+  }
+
+  /* ---- Intelligence card ---- */
+  .provider-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+  }
+
+  .provider-row + .provider-row {
+    border-top: 1px solid rgba(255,255,255,0.05);
+  }
+
+  .provider-left {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .provider-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: #F0EFED;
+  }
+
+  .provider-name.dim {
+    font-weight: 400;
+    color: #9A9894;
+  }
+
+  .provider-sub {
+    font-size: 11px;
+    color: #9A9894;
+  }
+
+  .provider-right {
+    flex-shrink: 0;
+  }
+
+  .status-chip {
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .chip-green {
+    background: rgba(30,138,76,0.18);
+    color: #3DBE75;
+  }
+
+  .not-detected {
+    font-size: 11px;
+    color: rgba(154,152,148,0.5);
+  }
+
+  /* Bottom padding inside panel */
+  .panel-bottom { height: 6px; }
+</style>
+</head>
+<body>
+
+<div style="position:relative;">
+  <div class="beak"></div>
+
+  <div class="panel">
+
+    <!-- TOP BAR -->
+    <div class="topbar">
+      <div class="app-icon">&#10003;</div>
+      <span class="wordmark">zero</span>
+      <div class="topbar-spacer"></div>
+      <div class="avatar-stack">
+        <div class="avatar av-blue">T</div>
+        <div class="avatar av-green">L</div>
+        <div class="avatar av-amber">A</div>
+        <div class="avatar av-red">T</div>
+      </div>
+      <span class="overflow-glyph">&#xB7;&#xB7;&#xB7;</span>
+    </div>
+
+    <!-- SEGMENTED NAV -->
+    <div class="seg-nav">
+      <div class="seg-item">Open loops</div>
+      <div class="seg-item">Accounts</div>
+      <div class="seg-item">Undo</div>
+      <div class="seg-item active">Settings</div>
+    </div>
+
+    <!-- DIVIDER -->
+    <div class="divider"></div>
+
+    <!-- RULES SECTION -->
+    <div class="rules-section">
+      <div class="section-header-row">
+        <span class="section-title">Rules</span>
+      </div>
+      <p class="section-subtitle">The one thing you configure. In plain English, what still needs you. Everything else is archived, reversibly.</p>
+
+      <div class="policy-box">
+        <pre><span class="policy-comment"># Keep a thread only if it genuinely needs me to act</span>
+<span class="policy-text">- A real person is awaiting my reply or decision.</span>
+<span class="policy-text">- An unanswered direct question addressed to me.</span>
+<span class="policy-text">- A payment has actually failed or is a live problem.</span>
+<span class="policy-text">- A legal, contractual, or dispute matter.</span>
+
+<span class="policy-comment">## Archive everything else (reversibly).</span></pre>
+      </div>
+    </div>
+
+    <!-- CATEGORIES SECTION -->
+    <div class="categories-section">
+      <div class="cat-label">Categories</div>
+      <div class="cat-chips">
+        <div class="cat-chip">
+          <span class="chip-emoji">&#x1F4E5;</span>
+          <span class="chip-dot" style="background:#1A73E8;"></span>
+          <span class="chip-name">Needs reply</span>
+        </div>
+        <div class="cat-chip">
+          <span class="chip-emoji">&#x23F3;</span>
+          <span class="chip-dot" style="background:#D4820A;"></span>
+          <span class="chip-name">Waiting on others</span>
+        </div>
+        <div class="cat-chip">
+          <span class="chip-emoji">&#x2705;</span>
+          <span class="chip-dot" style="background:#C0392B;"></span>
+          <span class="chip-name">Action required</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- DAILY ROUTINE CARD -->
+    <div class="card">
+      <div class="card-label">Daily routine</div>
+
+      <div class="time-row">
+        <span class="time-label">Run at</span>
+        <div class="stepper-box">07</div>
+        <span class="time-sep">:</span>
+        <div class="stepper-box">00</div>
+      </div>
+
+      <div class="days-row">
+        <span class="days-label">On</span>
+        <div class="day-pill day-inactive">S</div>
+        <div class="day-pill day-active">M</div>
+        <div class="day-pill day-active">T</div>
+        <div class="day-pill day-active">W</div>
+        <div class="day-pill day-active">T</div>
+        <div class="day-pill day-active">F</div>
+        <div class="day-pill day-inactive">S</div>
+      </div>
+
+      <div class="quick-row">
+        <div class="quick-pill">Weekdays</div>
+        <div class="quick-pill">Every day</div>
+      </div>
+    </div>
+
+    <!-- INTELLIGENCE CARD -->
+    <div class="card" style="margin-bottom:14px;">
+      <div class="card-label">Intelligence</div>
+
+      <div class="provider-row">
+        <div class="provider-left">
+          <span class="provider-name">Claude (Anthropic)</span>
+          <span class="provider-sub">2.1.191 (Claude Code)</span>
+        </div>
+        <div class="provider-right">
+          <span class="status-chip chip-green">Connected</span>
+        </div>
+      </div>
+
+      <div class="provider-row">
+        <div class="provider-left">
+          <span class="provider-name dim">Codex (OpenAI)</span>
+        </div>
+        <div class="provider-right">
+          <span class="not-detected">Not detected</span>
+        </div>
+      </div>
+
+      <div class="provider-row">
+        <div class="provider-left">
+          <span class="provider-name dim">Hermes (local)</span>
+        </div>
+        <div class="provider-right">
+          <span class="not-detected">Not detected</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel-bottom"></div>
+
+  </div><!-- /panel -->
+</div>
+
+</body>
+</html>
