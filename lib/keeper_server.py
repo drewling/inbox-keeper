@@ -838,9 +838,11 @@ def _set_client_credentials(payload):
                            "'.apps.googleusercontent.com'. Double-check the paste.")
 
     tmp = dst + ".tmp"
-    with open(tmp, "w") as f:
+    # Create 0600 from the start — the file holds the OAuth client secret and must
+    # never exist at the default umask (0644), even briefly.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
         json.dump(out, f, indent=2)
-    os.chmod(tmp, 0o600)  # contains the OAuth client secret
     os.replace(tmp, dst)
     return {"ok": True, "path": dst}
 

@@ -90,6 +90,14 @@ Edit `accounts.json`:
 The **first entry is the primary account** — triage digests and missed-item emails
 are sent from and to this address.
 
+> **Using the app?** You can skip the CLI steps below. On first launch, zero's
+> onboarding lets you paste your Google OAuth client (`client_secret.json`) directly,
+> then runs the browser sign-in for you. Create the client at
+> [Google Cloud Console](https://console.cloud.google.com/apis/credentials) →
+> *Create credentials → OAuth client ID → Desktop app*, enable the Gmail API, and
+> paste the downloaded JSON into the onboarding screen. The steps below are the
+> manual/CLI equivalent.
+
 ### Authenticate each account with gws
 
 For the primary account:

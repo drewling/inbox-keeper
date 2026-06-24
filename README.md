@@ -139,8 +139,10 @@ cd zero/macapp
 
 When you launch zero for the first time, the app walks you through:
 
-1. **Connect a Gmail account.** An OAuth flow opens in your browser. The app never
-   sees your password; it uses the `gws` CLI (which you have already authorized) to
+1. **Set up Google access, then connect a Gmail account.** First time connecting
+   Google? Paste your OAuth client (a free Desktop client from the Google Cloud
+   Console) when onboarding prompts you — it stays on your Mac. Then an OAuth flow
+   opens in your browser. The app never sees your password; it uses the `gws` CLI to
    read and label threads.
 2. **Review your keep policy.** Your plain-English policy is shown in the **Policy**
    tab. Edit it there or directly in [keep-policy.md](keep-policy.md).

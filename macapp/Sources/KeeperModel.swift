@@ -71,6 +71,10 @@ final class KeeperModel: ObservableObject {
     }
     @Published var preflight = Preflight()
 
+    // Has the user configured a Google OAuth client yet? Defaults true so the
+    // onboarding credential step never flashes before the check completes.
+    @Published var hasClient = true
+
     // Timing: protect mail newer than N days (the keeper run honors this).
     @Published var graceDays: Int = 0
     // First-run backlog offer: shown once after the first inbox connects.
@@ -146,6 +150,7 @@ final class KeeperModel: ObservableObject {
         runPreflight()
         Task {
             await reload()
+            await checkCredentials()
             await loadCategories()
             await loadSettings()
             await syncJob()
@@ -164,6 +169,32 @@ final class KeeperModel: ObservableObject {
         Task {
             do { try await api.saveSettings(graceDays: n) }
             catch { toast("Couldn’t save timing") }
+        }
+    }
+
+    /// Whether a Google OAuth client is configured. Drives the onboarding credential
+    /// step so a new user can set up Google access in-app instead of placing a file.
+    func checkCredentials() async {
+        if let s = try? await api.credentialsStatus() { hasClient = s.hasClient }
+    }
+
+    /// Onboarding sub-step: gws is installed but no Google OAuth client is set up yet.
+    var needsCredentials: Bool { needsOnboarding && preflight.gws && !hasClient }
+
+    /// Save the user's pasted client_secret.json, then reveal the connect step.
+    func saveCredentials(_ json: String) {
+        let text = json.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { toast("Paste your client_secret.json first"); return }
+        Task {
+            do {
+                try await api.setCredentials(json: text)
+                hasClient = true
+                toast("Google access set up — now connect your inbox")
+            } catch let KeeperAPI.KeeperError.http(_, msg) where !msg.isEmpty {
+                toast(msg)   // surface the server's specific guidance (bad paste, etc.)
+            } catch {
+                toast("Couldn’t save those credentials")
+            }
         }
     }
 

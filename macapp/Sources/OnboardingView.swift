@@ -58,21 +58,27 @@ struct OnboardingView: View {
 
             Spacer(minLength: 18)
 
-            // Connect the first inbox. gws is required for the OAuth flow.
-            Button { m.addAccount() } label: {
-                HStack(spacing: 7) {
-                    if m.isBusy { ProgressView().controlSize(.small).tint(.white) }
-                    else { Image(systemName: "plus").font(.system(size: 12, weight: .bold)) }
-                    Text(m.isBusy ? "Opening your browser…" : "Connect your first inbox")
+            if m.needsCredentials {
+                // gws is installed but there's no Google OAuth client yet — let the
+                // user set one up in-app instead of hand-placing client_secret.json.
+                CredentialsCard()
+            } else {
+                // Connect the first inbox. gws is required for the OAuth flow.
+                Button { m.addAccount() } label: {
+                    HStack(spacing: 7) {
+                        if m.isBusy { ProgressView().controlSize(.small).tint(.white) }
+                        else { Image(systemName: "plus").font(.system(size: 12, weight: .bold)) }
+                        Text(m.isBusy ? "Opening your browser…" : "Connect your first inbox")
+                    }
                 }
-            }
-            .buttonStyle(PrimaryButtonStyle(enabled: m.preflight.gws && !m.isBusy))
-            .disabled(!m.preflight.gws || m.isBusy)
+                .buttonStyle(PrimaryButtonStyle(enabled: m.preflight.gws && !m.isBusy))
+                .disabled(!m.preflight.gws || m.isBusy)
 
-            Text("Sign-in opens in your browser. The app never sees your password.")
-                .font(.system(size: 11)).foregroundStyle(Paper.ink4)
-                .multilineTextAlignment(.center).frame(maxWidth: 300)
-                .padding(.top, 10)
+                Text("Sign-in opens in your browser. The app never sees your password.")
+                    .font(.system(size: 11)).foregroundStyle(Paper.ink4)
+                    .multilineTextAlignment(.center).frame(maxWidth: 300)
+                    .padding(.top, 10)
+            }
 
             Spacer(minLength: 24)
         }
@@ -150,6 +156,50 @@ struct BacklogStep: View {
         }
         .padding(.horizontal, 20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// Onboarding credential setup: the user creates a free Desktop OAuth client in
+// Google Cloud Console and pastes the downloaded client_secret.json here, so a
+// stranger can set zero up without hand-editing files. The sign-in consent still
+// happens in the browser when they connect. The JSON stays on this Mac.
+private struct CredentialsCard: View {
+    @EnvironmentObject var m: KeeperModel
+    @State private var pasted = ""
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("SET UP GOOGLE ACCESS").font(.system(size: 10, weight: .semibold)).kerning(0.5)
+                .foregroundStyle(Paper.ink4)
+            Text("zero signs in through your own free Google app. Create an OAuth client, then paste it below — it never leaves this Mac.")
+                .font(.system(size: 12)).foregroundStyle(Paper.ink2)
+                .fixedSize(horizontal: false, vertical: true)
+            Link(destination: URL(string: "https://console.cloud.google.com/apis/credentials")!) {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.up.forward.square")
+                    Text("Open Google Cloud Console")
+                }.font(.system(size: 11, weight: .medium)).foregroundStyle(Paper.accentSoft)
+            }.buttonStyle(.plain)
+            Text("Create credentials → OAuth client ID → Desktop app → download the JSON. Enable the Gmail API for the project.")
+                .font(.system(size: 10.5)).foregroundStyle(Paper.ink4)
+                .fixedSize(horizontal: false, vertical: true)
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $pasted)
+                    .font(.system(size: 11, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .frame(height: 60).padding(8).glassSurface(8)
+                if pasted.isEmpty {
+                    Text("Paste client_secret.json here")
+                        .font(.system(size: 11)).foregroundStyle(Paper.ink4)
+                        .padding(.horizontal, 13).padding(.vertical, 16).allowsHitTesting(false)
+                }
+            }
+            Button { m.saveCredentials(pasted) } label: {
+                Text("Save Google access").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(PrimaryButtonStyle(enabled: !pasted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+            .disabled(pasted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        .padding(14).glassSurface(13).frame(maxWidth: 320).padding(.top, 14)
     }
 }
 

@@ -252,6 +252,9 @@ struct Draft: Decodable {
 
 // MARK: - API client
 
+/// Google OAuth client + account presence, from /api/credentials-status.
+struct CredStatus: Decodable { var hasClient = false; var hasAccounts = false }
+
 /// Thin async wrapper over the local keeper server. All calls are best-effort and
 /// throw `KeeperError` on transport/decoding failure so callers can surface a toast.
 struct KeeperAPI {
@@ -348,6 +351,15 @@ struct KeeperAPI {
     func settings() async throws -> Settings { try await get("/api/settings") }
     func saveSettings(graceDays: Int) async throws {
         _ = try await sendJSON("/api/settings", method: "PUT", body: ["grace_days": graceDays])
+    }
+
+    /// Whether a Google OAuth client is configured + whether any account is connected.
+    func credentialsStatus() async throws -> CredStatus { try await get("/api/credentials-status") }
+
+    /// Write the user's pasted Google OAuth client credentials (client_secret.json).
+    /// Throws KeeperError.http with the server's guidance message on a bad paste.
+    func setCredentials(json: String) async throws {
+        _ = try await postRaw("/api/set-credentials", ["json": json])
     }
 
     /// Delete a learned preference and suppress it so it's never re-learned.
