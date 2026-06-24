@@ -65,9 +65,12 @@ Two signals do most of the work and are worth stating plainly:
 
 Saying no is the whole discipline. Out of scope, on purpose:
 
-- **Not a reply-writer.** Draft generation + Slack review exist in this repo as a
-  *personal* second layer. They are explicitly NOT part of the core job and would
-  not ship in a v1 product. The core job is keeping the inbox honest.
+- **Not an auto-replier.** The app can draft a reply in your voice *on demand*
+  when you tap Reply on a loop (review, edit, send, all in the panel), and it
+  learns from your edits. It never drafts or sends on its own. The core job is
+  still keeping the inbox honest; replying is a deliberate, in-app action. (The
+  older Slack-based draft-review flow is retired from the default experience; it
+  remains in the repo for anyone who wants it.)
 - **Not a unified inbox / mail client.** Your existing apps are the UI.
 - **Not labels-as-organization.** It maintains exactly one thing — what's an open
   loop — not an elaborate folder taxonomy you have to maintain back.

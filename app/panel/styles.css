@@ -62,11 +62,12 @@ body {
   position: relative;
 }
 
-/* Inside the native app window: fill it; the window provides corners + shadow. */
-html.in-app, html.in-app body { background: var(--paper); }
+/* Inside the native popover: the popover paints the paper background + arrow, so
+   the web surface is transparent and fills the bubble edge-to-edge. */
+html.in-app, html.in-app body { background: transparent; }
 html.in-app .panel {
   width: 100%; height: 100vh; margin: 0;
-  border: 0; border-radius: 0;
+  border: 0; border-radius: 0; background: transparent;
 }
 
 /* ---- top bar ---------------------------------------------------------- */
@@ -209,17 +210,71 @@ html.in-app .panel {
 .row:last-child { border-bottom: 0; }
 .row.removing { opacity: 0; transform: translateX(10px); }
 
-.row-dismiss {
-  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+.row-actions {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  display: flex; gap: 3px; align-items: center;
+  padding-left: 14px; padding-right: 4px; border-radius: 8px;
+  background: linear-gradient(90deg, transparent, var(--paper-raised) 22%);
+  opacity: 0; transition: opacity 130ms var(--ease);
+}
+.row:hover .row-actions, .row:focus-within .row-actions { opacity: 1; }
+.row-act {
   width: 28px; height: 28px; display: grid; place-items: center;
   border: 0; border-radius: 7px; cursor: pointer;
   background: var(--paper-sunken); color: var(--ink-3);
-  opacity: 0; transition: opacity 130ms var(--ease), background 130ms var(--ease), color 130ms var(--ease);
+  transition: background 130ms var(--ease), color 130ms var(--ease);
 }
-.row-dismiss svg { width: 15px; height: 15px; }
-.row:hover .row-dismiss, .row:focus-within .row-dismiss { opacity: 1; }
-.row-dismiss:hover { background: var(--accent-soft); color: var(--accent-press); }
-.row-dismiss:focus-visible { opacity: 1; outline: 2px solid var(--accent-ring); outline-offset: 1px; }
+.row-act svg { width: 15px; height: 15px; }
+.row-act:hover { background: var(--accent-soft); color: var(--accent-press); }
+.row-act:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 1px; }
+
+/* ---- add account ------------------------------------------------------ */
+.add-account {
+  width: 100%; margin-top: 16px; padding: 11px;
+  border: 1px dashed var(--hairline); border-radius: var(--r-md);
+  background: none; color: var(--ink-2); font: inherit; font-size: 13px; font-weight: 500;
+  cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
+  transition: background 140ms var(--ease), border-color 140ms var(--ease), color 140ms var(--ease);
+}
+.add-account:hover { background: var(--paper-raised); border-color: var(--ink-4); color: var(--ink); }
+.add-account[disabled] { cursor: default; opacity: 0.8; }
+.add-account .plus { font-size: 16px; font-weight: 600; line-height: 1; }
+
+/* ---- reply composer (sheet over the panel) ---------------------------- */
+.composer {
+  position: absolute; inset: 0; z-index: 20;
+  background: var(--paper); display: flex; flex-direction: column;
+  transform: translateY(100%); transition: transform 240ms var(--ease);
+}
+.composer.show { transform: none; }
+.composer-head {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+  padding: 15px var(--pad) 12px; border-bottom: 0.5px solid var(--hairline);
+  background: var(--paper-raised);
+}
+.composer-to { font-size: 15px; font-weight: 600; color: var(--ink); letter-spacing: -0.01em; }
+.composer-subj { font-size: 12.5px; color: var(--ink-3); margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; }
+.composer-x {
+  flex: 0 0 auto; appearance: none; border: 0; cursor: pointer;
+  width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center;
+  background: var(--paper-sunken); color: var(--ink-3);
+}
+.composer-x:hover { background: var(--hairline); color: var(--ink); }
+.composer-body { flex: 1; display: flex; padding: 14px var(--pad); min-height: 0; }
+.composer-loading { color: var(--ink-3); font-size: 13px; display: flex; align-items: center; gap: 9px; }
+/* explicit display above would otherwise defeat the hidden attribute */
+.composer-loading[hidden], .composer-text[hidden] { display: none; }
+.composer-text {
+  flex: 1; width: 100%; resize: none; border: 0; background: none; outline: none;
+  font: inherit; font-size: 14px; line-height: 1.55; color: var(--ink);
+}
+.composer-foot {
+  display: flex; gap: 8px; padding: 11px var(--pad);
+  border-top: 0.5px solid var(--hairline); background: var(--paper-raised);
+}
+.composer-foot .btn-ghost { flex: 0 0 auto; }
+.composer-foot .btn-primary { flex: 1; }
 .mono {
   width: 26px; height: 26px; border-radius: 7px; margin-top: 1px;
   display: grid; place-items: center;

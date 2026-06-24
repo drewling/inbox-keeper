@@ -28,6 +28,7 @@ STATE_PATH = os.path.join(ROOT, "app", "state.json")
 POLICY_PATH = os.path.join(ROOT, "keep-policy.md")
 ACCOUNTS_PATH = os.path.join(ROOT, "accounts.json")
 PYTHON = sys.executable or "python3"
+CLAUDE = os.environ.get("CLAUDE_BIN", "claude")
 
 _ASSET_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
                 ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml",
@@ -43,6 +44,29 @@ def _gws_env():
     e = dict(os.environ)
     e["GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND"] = "file"
     return e
+
+
+_state_lock = threading.Lock()
+
+
+def _patch_state(mutate):
+    """Apply a surgical change to the cached state.json (under a lock) so a single
+    dismiss/undo stays consistent without a full ~9s rebuild."""
+    if not os.path.isfile(STATE_PATH):
+        return
+    with _state_lock:
+        try:
+            with open(STATE_PATH) as f:
+                st = json.load(f)
+        except Exception:
+            return
+        mutate(st)
+        st["total_loops"] = sum(a.get("inbox_threads", 0)
+                                for a in st.get("accounts", []) if a.get("ok", True))
+        tmp = STATE_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(st, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, STATE_PATH)
 
 
 def _build_state_blocking():
@@ -154,6 +178,19 @@ def _dismiss(payload):
                       "--json", json.dumps({"addLabelIds": ["INBOX"], "removeLabelIds": remove})],
                 allow_empty=True)
         learning.record({"type": "keep_override_undo", "account": slug, "thread_id": tid})
+
+        def _readd(st):
+            for a in st.get("accounts", []):
+                if a.get("slug") == slug and not any(
+                        l.get("thread_id") == tid for l in a.get("loops", [])):
+                    a.setdefault("loops", []).insert(0, {
+                        "thread_id": tid, "sender": payload.get("sender", ""),
+                        "sender_email": payload.get("sender_email", ""),
+                        "subject": payload.get("subject", ""),
+                        "snippet": payload.get("snippet", ""),
+                        "epoch": payload.get("epoch", 0), "account_slug": slug})
+                    a["inbox_threads"] = a.get("inbox_threads", 0) + 1
+        _patch_state(_readd)
         return {"ok": True, "restored": tid}
 
     label = iz._dated_label(iz._BASE_LABEL)
@@ -168,11 +205,160 @@ def _dismiss(payload):
                      "sender_email": payload.get("sender_email", ""),
                      "subject": payload.get("subject", ""),
                      "snippet": payload.get("snippet", "")})
+
+    def _remove(st):
+        for a in st.get("accounts", []):
+            if a.get("slug") != slug:
+                continue
+            before = len(a.get("loops", []))
+            a["loops"] = [l for l in a.get("loops", []) if l.get("thread_id") != tid]
+            if len(a["loops"]) < before:
+                a["inbox_threads"] = max(0, a.get("inbox_threads", 1) - 1)
+    _patch_state(_remove)
     return {"ok": True, "label": label, "thread_id": tid}
 
 
+def _acct(slug):
+    a = next((a for a in _load_accounts()
+              if (a.get("slug") or a.get("email")) == slug), None)
+    if not a:
+        raise ValueError(f"unknown account {slug!r}")
+    return a
+
+
+def _gen_draft(payload):
+    """Draft a reply to a thread in the user's voice. The user already chose to
+    reply (they tapped Reply), so there's no needs-reply gate here."""
+    sys.path.insert(0, HERE)
+    import draftutil as du       # noqa: E402
+    import learning              # noqa: E402
+    from email.utils import parseaddr
+    slug, tid = payload.get("slug"), payload.get("thread_id")
+    steer = (payload.get("steer") or "").strip()
+    if not slug or not tid:
+        raise ValueError("draft requires slug and thread_id")
+    cfg = _acct(slug)["config_dir"]
+    t = du._gws(cfg, ["gmail", "users", "threads", "get",
+                      "--params", json.dumps({"userId": "me", "id": tid, "format": "metadata",
+                                              "metadataHeaders": ["From", "Subject", "Date"]})])
+    msgs = t.get("messages", []) or []
+    if not msgs:
+        raise ValueError("thread has no messages")
+    convo = []
+    subject = "(no subject)"
+    last_from = ""
+    for m in msgs:
+        h = {x["name"].lower(): x["value"] for x in m.get("payload", {}).get("headers", [])}
+        last_from = h.get("from", last_from)
+        subject = h.get("subject", subject)
+        convo.append(f"From {h.get('from','?')}: {m.get('snippet','')}")
+    to_name = parseaddr(last_from)[0] or parseaddr(last_from)[1] or last_from
+    to_email = parseaddr(last_from)[1] or ""
+    voice = learning.learned_text()
+    voice_block = f"\nVOICE NOTES learned from the user's past edits:\n{voice}\n" if voice.strip() else ""
+    prompt = (
+        "Draft a reply, in Tayo Onabule's voice, to the email thread below. British English, "
+        "first person, warm and concise (2-6 sentences), mirror the sender's formality, reference "
+        "real thread context, never invent facts or figures (use placeholders like [day]/[amount] "
+        f"if needed), sign off as \"Tayo\". Reply to {to_name}.{voice_block}"
+        + (f"\nADJUSTMENT requested: {steer}\n" if steer else "")
+        + f"\nSubject: {subject}\nThread (oldest to newest):\n" + "\n".join(convo[-8:])
+        + "\n\nOutput ONLY the reply body text, no preamble, no subject line."
+    )
+    try:
+        r = subprocess.run([CLAUDE, "-p", prompt, "--model", "haiku"],
+                           capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("drafting timed out")
+    if r.returncode != 0:
+        raise RuntimeError("drafting failed")
+    return {"ok": True, "to_name": to_name, "to_email": to_email,
+            "subject": subject, "body": r.stdout.strip()}
+
+
+def _send_draft(payload):
+    """Create + send a reply on the thread; capture an edit signal if the user
+    changed the generated text."""
+    sys.path.insert(0, HERE)
+    import draftutil as du       # noqa: E402
+    import learning              # noqa: E402
+    slug = payload.get("slug")
+    tid = payload.get("thread_id")
+    to = payload.get("to_email") or payload.get("to") or ""
+    subject = payload.get("subject") or ""
+    final = payload.get("body") or ""
+    original = payload.get("original") or ""
+    if not (slug and tid and to and final.strip()):
+        raise ValueError("send requires slug, thread_id, to, and body")
+    cfg = _acct(slug)["config_dir"]
+    raw = du._build_raw(cfg, tid, to, subject, final)
+    d = du._gws(cfg, ["gmail", "users", "drafts", "create",
+                      "--params", json.dumps({"userId": "me"}),
+                      "--json", json.dumps({"message": {"raw": raw, "threadId": tid}})])
+    du._gws(cfg, ["gmail", "users", "drafts", "send",
+                  "--params", json.dumps({"userId": "me"}),
+                  "--json", json.dumps({"id": d["id"]})])
+    if original and original.strip() != final.strip():
+        learning.record({"type": "draft_edit", "thread_id": tid,
+                         "original_snippet": original[:200], "final": final[:400]})
+    # Replying resolves the loop; drop it from the cached state.
+    def _remove(st):
+        for a in st.get("accounts", []):
+            if a.get("slug") == slug:
+                a["loops"] = [l for l in a.get("loops", []) if l.get("thread_id") != tid]
+                a["inbox_threads"] = max(0, a.get("inbox_threads", 1) - 1)
+    _patch_state(_remove)
+    return {"ok": True, "sent": tid}
+
+
+def _add_account(payload):
+    """Authenticate a new Gmail account via gws (opens the user's browser) and add
+    it to accounts.json. The OAuth consent happens in the browser; we never see
+    credentials."""
+    import time as _time
+    home = os.path.expanduser("~")
+    pending = os.path.join(home, ".config", "gws", "accounts", f"pending-{int(_time.time())}")
+    os.makedirs(pending, exist_ok=True)
+    env = _gws_env()
+    env["GOOGLE_WORKSPACE_CLI_CONFIG_DIR"] = pending
+    _set_job_message("Opening your browser to sign in...")
+    r = subprocess.run(["gws", "auth", "login"], env=env,
+                       capture_output=True, text=True, timeout=300)
+    if r.returncode != 0:
+        raise RuntimeError("sign-in didn't complete: " + (r.stderr or r.stdout or "")[-200:])
+    prof = subprocess.run(["gws", "gmail", "users", "getProfile", "--params",
+                           json.dumps({"userId": "me"})], env=env,
+                          capture_output=True, text=True, timeout=60)
+    email = ""
+    for line in prof.stdout.splitlines():
+        line = line.strip()
+        if line.startswith("{") and "keyring" not in line:
+            try:
+                email = json.loads(line).get("emailAddress", "")
+            except Exception:
+                pass
+    if not email:
+        raise RuntimeError("signed in but couldn't read the account email")
+    slug = email.split("@")[0].replace(".", "-").lower()
+    final_dir = os.path.join(home, ".config", "gws", "accounts", slug)
+    accts = _load_accounts()
+    if any(a.get("email") == email for a in accts):
+        raise RuntimeError(f"{email} is already added")
+    if os.path.exists(final_dir):
+        final_dir = pending  # keep the pending dir if the nice name is taken
+    else:
+        os.rename(pending, final_dir)
+    accts.append({"slug": slug, "email": email, "config_dir": final_dir})
+    tmp = ACCOUNTS_PATH + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(accts, f, indent=2)
+    os.replace(tmp, ACCOUNTS_PATH)
+    _set_job_message("Adding account...")
+    _build_state_blocking()
+
+
 _JOB_KINDS = {"refresh": lambda p: _build_state_blocking(),
-              "run": _run_keeper, "undo": _run_undo}
+              "run": _run_keeper, "undo": _run_undo, "add_account": _add_account}
 
 
 def _set_job_message(msg):
@@ -279,14 +465,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, {"error": "cross-site request blocked"})
         p = urlparse(self.path).path
         payload = self._body_json()
-        # Dismiss is fast (one thread) and runs synchronously, not via the job slot.
-        if p == "/api/dismiss":
+        # Fast synchronous endpoints (one thread / one model call), not the job slot.
+        _sync = {"/api/dismiss": _dismiss, "/api/draft": _gen_draft,
+                 "/api/draft/send": _send_draft}
+        if p in _sync:
             try:
-                return self._send(200, _dismiss(payload))
+                return self._send(200, _sync[p](payload))
             except Exception as exc:
                 return self._send(500, {"error": str(exc)})
         kind = {"/api/refresh": "refresh", "/api/run": "run",
-                "/api/undo": "undo"}.get(p)
+                "/api/undo": "undo", "/api/add-account": "add_account"}.get(p)
         if not kind:
             return self._send(404, {"error": "not found"})
         jid = _start_job(kind, payload)
