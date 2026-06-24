@@ -19,6 +19,7 @@ sys.path.insert(0, HERE)
 import inbox_zero as iz       # noqa: E402
 import thin_protected as tp   # noqa: E402
 import draftutil as du        # noqa: E402
+import learning               # noqa: E402
 
 CLAUDE = os.environ.get("CLAUDE_BIN", "claude")
 
@@ -104,6 +105,19 @@ def _thread_info(cfg, tid, me):
             "subject": subject, "snippet": snippet}
 
 
+def _learned_preface():
+    """Preferences distilled from the user's past actions (lib/learn.py)."""
+    try:
+        txt = learning.learned_text().strip()
+    except Exception:
+        txt = ""
+    if not txt:
+        return ""
+    return ("PREFERENCES LEARNED FROM THE USER'S PAST ACTIONS (apply these when deciding; "
+            "they refine but never override keeping genuine personal/legal/payment loops):\n"
+            + txt + "\n\n")
+
+
 def _classify(chunk):
     lines = []
     for i, c in enumerate(chunk):
@@ -112,7 +126,8 @@ def _classify(chunk):
             f' | replied_before: {"YES" if c["replied_before"] else "NO"} | subject: {c["subject"]}'
             f' | snippet: {c["snippet"]}')
     try:
-        r = subprocess.run([CLAUDE, "-p", PROMPT_HEAD + "\n".join(lines), "--model", "haiku"],
+        r = subprocess.run([CLAUDE, "-p", _learned_preface() + PROMPT_HEAD + "\n".join(lines),
+                            "--model", "haiku"],
                            capture_output=True, text=True, timeout=150)
     except subprocess.TimeoutExpired:
         return {}

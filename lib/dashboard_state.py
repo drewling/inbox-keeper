@@ -35,6 +35,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import draftutil as du        # noqa: E402
 import inbox_zero as iz       # noqa: E402
+import learning               # noqa: E402
 
 # Warm, restrained avatar palette (OKLCH-derived hex, muted). Indexed by slug.
 _PALETTE = ["#B5654A", "#7C8B6F", "#9A7B4F", "#6F8499", "#8A6F99", "#A8845C"]
@@ -174,6 +175,7 @@ def build(accounts_path, max_loops):
         "failed_accounts": failed,
         "accounts": states,
         "policy": policy,
+        "learned": learning.learned_text(),
     }
 
 

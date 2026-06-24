@@ -41,3 +41,6 @@ app/state.json
 
 # Editor / tooling dirs
 .claude/
+
+# Learning store (user-specific signals + rollup, generated at runtime)
+learning/

@@ -58,6 +58,9 @@ for a in accts:
         "$config_dir" "$email" --grace-days 2 --execute
     done <<< "$accounts"
 
+    echo "--- Learning from recent actions ---"
+    "$MAIL_TRIAGE_PYTHON" "$MAIL_TRIAGE_LIB/learn.py" || true
+
     echo "--- Refreshing dashboard state ---"
     "$MAIL_TRIAGE_PYTHON" "$MAIL_TRIAGE_LIB/dashboard_state.py"
     echo "Done."
