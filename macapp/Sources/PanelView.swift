@@ -132,7 +132,7 @@ private struct SegmentedNav: View {
             ForEach(Tab.allCases) { tab in
                 let on = m.tab == tab
                 Button {
-                    withAnimation(.snappy(duration: 0.3)) { m.tab = tab }
+                    withAnimation(Motion.morph) { m.tab = tab }
                 } label: {
                     Text(tab.title)
                         .font(.system(size: 12.5, weight: on ? .semibold : .medium))
@@ -140,11 +140,12 @@ private struct SegmentedNav: View {
                         .frame(maxWidth: .infinity).frame(height: 28)
                         .background {
                             if on {
+                                // A real Liquid-Glass pill that flows between tabs — it
+                                // looks like a single blob of glass migrating, catching
+                                // light, rather than a box snapping position.
                                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .fill(Paper.raised.opacity(0.16))
-                                    .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                        .strokeBorder(LinearGradient(colors: [Paper.hairline.opacity(0.28), Paper.hairline.opacity(0.05)],
-                                                                     startPoint: .top, endPoint: .bottom), lineWidth: 0.75))
+                                    .fill(Paper.raised.opacity(0.10))
+                                    .glassSurface(7)
                                     .shadow(color: .black.opacity(0.18), radius: 3, y: 1)
                                     .matchedGeometryEffect(id: "seg", in: ns)
                             }
@@ -225,7 +226,11 @@ private struct HeroCount: View {
     let total: Int; let accounts: Int
     var body: some View {
         VStack(spacing: 2) {
+            // The count rolls digit-by-digit when something is set aside or a run
+            // finishes — the inbox visibly getting lighter.
             Text("\(total)").font(.system(size: 46, weight: .bold)).foregroundStyle(Paper.accent).kerning(-1)
+                .contentTransition(.numericText(value: Double(total)))
+                .animation(Motion.settle, value: total)
             Text(total == 1 ? "thing still needs you" : "things still need you")
                 .font(.system(size: 15, weight: .medium))
             Text("Across \(accounts) accounts. Tap any to open it in Gmail.")
@@ -260,7 +265,7 @@ private struct LoopRowView: View {
             HStack(spacing: 2) {
                 RowAction(symbol: "arrowshape.turn.up.left", help: "Draft a reply") { m.openComposer(row) }
                 RowAction(symbol: "archivebox", help: "Set aside (reversible)") {
-                    withAnimation(.easeOut(duration: 0.18)) { m.dismiss(row) }
+                    withAnimation(Motion.sweep) { m.dismiss(row) }
                 }
             }
             .opacity(hovering ? 1 : 0.55)
@@ -269,6 +274,11 @@ private struct LoopRowView: View {
         .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
             .fill(hovering ? Paper.raised.opacity(0.08) : .clear))
         .onHover { hovering = $0 }
+        // Leaving rows sweep right and dissolve, like being slid onto the set-aside
+        // pile; arrivals (undo) just fade so a restore feels gentle, not jarring.
+        .transition(.asymmetric(
+            insertion: .opacity,
+            removal: .opacity.combined(with: .scale(scale: 0.94)).combined(with: .move(edge: .trailing))))
     }
 }
 
@@ -644,11 +654,7 @@ private struct ComposerView: View {
                 .overlay(alignment: .bottom) { Rectangle().fill(Paper.hairline.opacity(0.1)).frame(height: 0.5) }
 
                 if m.composerLoading {
-                    HStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
-                        Text("Drafting in your voice…").font(.system(size: 12.5)).foregroundStyle(Paper.ink3)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 178)
+                    DraftingPlaceholder()
                 } else {
                     FormatBar(rich: rich)
                     RichTextEditor(controller: rich, initialText: m.composerText)
@@ -687,6 +693,31 @@ private struct ComposerView: View {
             .shadow(color: .black.opacity(0.32), radius: 24, y: 10)
             .padding(10)
         }
+    }
+}
+
+// While the reply is being written, lines of "text" shimmer into place — the draft
+// visibly materialising in your voice, rather than a bare spinner.
+private struct DraftingPlaceholder: View {
+    private let widths: [CGFloat] = [0.92, 0.74, 0.96, 0.58, 0.84]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 7) {
+                Image(systemName: "sparkles").font(.system(size: 12)).foregroundStyle(Paper.accentSoft)
+                Text("Drafting in your voice…").font(.system(size: 12.5)).foregroundStyle(Paper.ink3)
+            }
+            VStack(alignment: .leading, spacing: 9) {
+                ForEach(Array(widths.enumerated()), id: \.offset) { _, w in
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(Paper.raised.opacity(0.07))
+                        .frame(height: 11).frame(maxWidth: .infinity, alignment: .leading)
+                        .scaleEffect(x: w, anchor: .leading)
+                        .shimmer(radius: 4)
+                }
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 16)
+        .frame(maxWidth: .infinity, minHeight: 178, alignment: .top)
     }
 }
 
@@ -748,29 +779,70 @@ private struct ActionBar: View {
 private struct TidyingView: View {
     let message: String
     var body: some View {
-        VStack(spacing: 14) {
-            ProgressView().controlSize(.large)
+        VStack(spacing: 16) {
+            BreathingOrb()
             Text("Tidying your inboxes").font(.system(size: 17, weight: .semibold))
             Text(message).font(.system(size: 12.5)).foregroundStyle(Paper.accent)
+                .contentTransition(.opacity)
+                .animation(.easeInOut(duration: 0.25), value: message)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
+// A soft glass orb that breathes while the keeper works — calmer and more alive than
+// a system spinner, and unmistakably the same glass as the rest of the panel.
+private struct BreathingOrb: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        ZStack {
+            Circle().fill(Paper.accentHi.opacity(0.20)).blur(radius: 7)
+            Image(systemName: "tray.full").font(.system(size: 21, weight: .semibold))
+                .foregroundStyle(Paper.accentSoft)
+        }
+        .frame(width: 66, height: 66)
+        .glassSurface(33)
+        .phaseAnimator(reduceMotion ? [1.0] : [0.95, 1.06]) { view, scale in
+            view.scaleEffect(scale).opacity(scale < 1 ? 0.9 : 1)
+        } animation: { _ in .easeInOut(duration: 1.15) }
+    }
+}
+
 private struct EmptyState: View {
     let symbol: String; let warn: Bool; let title: String; let message: String
+    @State private var appeared = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var tint: Color { warn ? Paper.danger : Paper.clear }
     var body: some View {
         VStack(spacing: 10) {
             Image(systemName: symbol)
                 .font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(warn ? Paper.danger : Paper.clear)
+                .foregroundStyle(tint)
                 .frame(width: 60, height: 60)
-                .background(Circle().fill((warn ? Paper.danger : Paper.clear).opacity(0.12)))
+                .background(
+                    ZStack {
+                        Circle().fill(tint.opacity(0.12))
+                        // Reaching "all clear" is the milestone — a soft radial bloom
+                        // rings out once behind the mark to mark the win.
+                        if !warn {
+                            Circle().fill(RadialGradient(colors: [tint.opacity(0.4), .clear],
+                                                         center: .center, startRadius: 2, endRadius: 58))
+                                .scaleEffect(appeared ? 1.9 : 0.2)
+                                .opacity(appeared ? 0 : 0.9)
+                                .blur(radius: 6).allowsHitTesting(false)
+                        }
+                    }
+                )
+                .scaleEffect((appeared || warn || reduceMotion) ? 1 : 0.6)
+                .symbolEffect(.bounce, value: appeared)
             Text(title).font(.system(size: 16, weight: .semibold))
             Text(message).font(.system(size: 12.5)).foregroundStyle(Paper.ink3)
                 .multilineTextAlignment(.center).frame(maxWidth: 280)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity).padding(24)
+        .onAppear {
+            if reduceMotion { appeared = true } else { withAnimation(Motion.pop) { appeared = true } }
+        }
     }
 }
 
@@ -814,8 +886,14 @@ private struct SkeletonView: View {
 
 private struct ToastView: View {
     let info: ToastInfo
+    @State private var bounce = false
+    // An action with an Undo is a set-aside; otherwise it's a confirmation.
+    private var symbol: String { info.undo != nil ? "archivebox.fill" : "checkmark.circle.fill" }
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: symbol).font(.system(size: 13.5, weight: .semibold))
+                .foregroundStyle(info.undo != nil ? Paper.accentSoft : Paper.clear)
+                .symbolEffect(.bounce, value: bounce)
             Text(info.message).font(.system(size: 12.5, weight: .medium)).foregroundStyle(.white)
                 .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
             if let undo = info.undo {
@@ -823,11 +901,12 @@ private struct ToastView: View {
                     .buttonStyle(.plain).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Paper.accentSoft)
             }
         }
-        .padding(.horizontal, 16).padding(.vertical, 11)
+        .padding(.horizontal, 15).padding(.vertical, 11)
         .frame(maxWidth: 320)
-        // Long messages (e.g. setup guidance) get a rounded card, not a stretched
-        // pill; near-opaque dark so white text stays crisp over any background.
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .fill(Paper.paper.opacity(0.985)).shadow(color: .black.opacity(0.3), radius: 14, y: 5))
+        // A slab of real glass (dark-tinted so white text stays crisp over anything
+        // behind the panel), with the icon giving a little life on arrival.
+        .glassSurface(16, tint: Color(0, 0, 0).opacity(0.55))
+        .shadow(color: .black.opacity(0.3), radius: 14, y: 5)
+        .onAppear { bounce = true }
     }
 }

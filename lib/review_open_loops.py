@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Final aggressive pass: keep ONLY genuine open loops that need Tayo's attention.
+"""Final aggressive pass: keep ONLY genuine open loops that need the account owner's attention.
 
 Thread-level. The core signal for "already dealt with" is who sent the LAST message:
-- last message is from Tayo  -> he already responded; ball is in their court -> ARCHIVE.
-- Tayo never engaged + sender is cold/no-history -> not a real loop -> ARCHIVE.
-- last message is from a real person Tayo has corresponded with, with an open ask -> Haiku decides.
+- last message is from the owner -> they already responded; ball is in their court -> ARCHIVE.
+- Owner never engaged + sender is cold/no-history -> not a real loop -> ARCHIVE.
+- last message is from a real person the owner has corresponded with, with an open ask -> Haiku decides.
 
 Always KEPT regardless: live payment problems, legal/disputes, explicit deadlines.
 Reversible (dated recovery label). Dry-run by default.
@@ -25,6 +25,32 @@ import learning               # noqa: E402
 CLAUDE = os.environ.get("CLAUDE_BIN", "claude")
 
 _CATEGORIES_PATH = os.path.join(ROOT, "categories.json")
+_LABEL_HISTORY_PATH = os.path.join(ROOT, "app", "category_label_history.json")
+
+
+def _load_label_history():
+    """Return the persisted set of category label names (past + present)."""
+    try:
+        if os.path.exists(_LABEL_HISTORY_PATH):
+            with open(_LABEL_HISTORY_PATH) as f:
+                data = json.load(f)
+            return set(data.get("labels", []))
+    except Exception:
+        pass
+    return set()
+
+
+def _add_to_label_history(names):
+    """Union names into the persisted label history file. Non-fatal."""
+    try:
+        existing = _load_label_history()
+        merged = existing | set(names)
+        tmp = _LABEL_HISTORY_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"labels": sorted(merged)}, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, _LABEL_HISTORY_PATH)
+    except Exception:
+        pass
 
 _DEFAULT_CATEGORIES = [
     {"name": "Needs reply",      "description": "Someone is waiting on a direct response from me.", "emoji": "✉️"},
@@ -154,9 +180,9 @@ def _thread_info(cfg, tid, me):
     subject = h.get("subject", "(no subject)")
     snippet = (last.get("snippet", "") or "")[:160]
     last_email = (parseaddr(last_from)[1] or "").lower()
-    last_from_tayo = bool(me and me.lower() in last_from.lower())
+    last_from_owner = bool(me and me.lower() in last_from.lower())
     return {"id": tid, "ids": [m["id"] for m in msgs], "last_from": last_from,
-            "last_email": last_email, "last_from_tayo": last_from_tayo,
+            "last_email": last_email, "last_from_owner": last_from_owner,
             "subject": subject, "snippet": snippet}
 
 
@@ -185,7 +211,7 @@ def _classify(chunk):
     lines = []
     for i, c in enumerate(chunk):
         lines.append(
-            f'{i}. last_sender: {c["last_from"]} | last_from_owner: {"YES" if c["last_from_tayo"] else "NO"}'
+            f'{i}. last_sender: {c["last_from"]} | last_from_owner: {"YES" if c["last_from_owner"] else "NO"}'
             f' | replied_before: {"YES" if c["replied_before"] else "NO"} | subject: {c["subject"]}'
             f' | snippet: {c["snippet"]}')
     prompt = (_learned_preface()
@@ -227,7 +253,8 @@ def _classify(chunk):
 
 def apply_category(cfg, thread_id, category_name):
     """Apply a category label to a kept thread: add '<emoji> <name>', remove any other
-    category labels from our set. Never touches non-category labels. Non-fatal on error.
+    category labels from our set (current OR historical). Never touches non-category
+    labels. Non-fatal on error.
 
     Args:
         cfg:           gws config_dir for the account.
@@ -237,6 +264,11 @@ def apply_category(cfg, thread_id, category_name):
     """
     cats = _categories()
     cat_label_names = {_category_label_name(c) for c in cats}
+    # Union current names into persistent history so renamed labels are tracked.
+    _add_to_label_history(cat_label_names)
+    # The full set of labels we'll clean up = current ∪ historical.
+    all_known_cat_labels = cat_label_names | _load_label_history()
+
     target_label = None
     if category_name:
         cat = next((c for c in cats if c["name"] == category_name), None)
@@ -260,10 +292,11 @@ def apply_category(cfg, thread_id, category_name):
         id_to_name = {l["id"]: l["name"] for l in all_labels}
         name_to_id = {l["name"]: l["id"] for l in all_labels}
 
-        # Labels to remove: category labels currently on the thread (excluding the target).
+        # Labels to remove: any current/historical category label on the thread
+        # (excluding the new target, if any).
         remove_ids = [
             lid for lid in thread_label_ids
-            if id_to_name.get(lid, "") in cat_label_names
+            if id_to_name.get(lid, "") in all_known_cat_labels
             and id_to_name.get(lid, "") != target_label
         ]
 
@@ -317,10 +350,10 @@ def main():
             infos.append(info)
 
     archive_msg_ids, kept, keep_s = [], 0, []
-    # Deterministic fast-path: last message from Tayo -> dealt with -> archive.
+    # Deterministic fast-path: last message from the owner -> dealt with -> archive.
     to_judge = []
     for c in infos:
-        if c["last_from_tayo"]:
+        if c["last_from_owner"]:
             archive_msg_ids += c["ids"]
         else:
             to_judge.append(c)
@@ -345,7 +378,7 @@ def main():
                     apply_category(a.config_dir, c["id"], category)
 
     result = {"account": a.account_label, "threads": len(infos),
-              "dealt_with_last_from_tayo": sum(1 for c in infos if c["last_from_tayo"]),
+              "dealt_with_last_from_owner": sum(1 for c in infos if c["last_from_owner"]),
               "to_archive_threads": len(infos) - kept, "to_keep_threads": kept,
               "mode": "execute" if a.execute else "dry-run", "keep_sample": keep_s}
 

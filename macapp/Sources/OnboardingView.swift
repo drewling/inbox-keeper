@@ -7,12 +7,14 @@ import SwiftUI
 
 struct OnboardingView: View {
     @EnvironmentObject var m: KeeperModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
             Spacer(minLength: 30)
 
-            // App mark: the glossy terracotta squircle + cream check (echoes the icon).
+            // App mark: the glossy blue squircle + cream check (echoes the icon). It
+            // breathes almost imperceptibly so the first screen feels alive, not static.
             RoundedRectangle(cornerRadius: 15, style: .continuous)
                 .fill(LinearGradient(colors: [Paper.accentHi, Paper.accent], startPoint: .top, endPoint: .bottom))
                 .frame(width: 56, height: 56)
@@ -21,6 +23,8 @@ struct OnboardingView: View {
                 .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous)
                     .strokeBorder(.white.opacity(0.28), lineWidth: 0.75))
                 .shadow(color: Paper.accent.opacity(0.45), radius: 12, y: 4)
+                .phaseAnimator(reduceMotion ? [1.0] : [1.0, 1.035]) { v, s in v.scaleEffect(s) }
+                    animation: { _ in .easeInOut(duration: 2.4) }
 
             Text("inbox·keeper")
                 .font(.system(size: 21, weight: .semibold)).kerning(-0.2)

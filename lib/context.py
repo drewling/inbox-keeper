@@ -3,7 +3,7 @@
 
 Pulls the three sources the draft pipeline grounds on:
   1. The full thread (all messages, who said what) — not just the last message.
-  2. Prior correspondence with the sender — establishes relationship + Tayo's tone
+  2. Prior correspondence with the sender — establishes relationship + the owner's tone
      with this person, and whether any two-way history exists at all (the key
      cold-outreach signal).
   3. The Drewl profile / reply boundaries (knowledge/drewl.md).
@@ -58,7 +58,7 @@ def render_thread(msgs, profile_email, max_chars=4000):
     for m in msgs:
         frm = _hdr(m, "from")
         date = _hdr(m, "date")
-        who = "Tayo" if profile_email and profile_email.lower() in frm.lower() else (parseaddr(frm)[0] or parseaddr(frm)[1] or frm)
+        who = "Me" if profile_email and profile_email.lower() in frm.lower() else (parseaddr(frm)[0] or parseaddr(frm)[1] or frm)
         body = _plain_body(m.get("payload", {})).strip()
         # collapse quoted tails and signatures roughly
         body = re.split(r"\nOn .+ wrote:\n|\n-- \n|\n_{5,}", body)[0].strip()
@@ -71,7 +71,7 @@ def render_thread(msgs, profile_email, max_chars=4000):
 def sender_history(config_dir, sender_email, current_thread_id, profile_email, max_msgs=6):
     """Return (has_history, summary_text) for prior correspondence with sender_email.
 
-    has_history is True only if there's a genuine prior two-way exchange (Tayo has
+    has_history is True only if there's a genuine prior two-way exchange (the owner has
     sent to them OR there are multiple older messages) — the anti-cold-outreach signal.
     """
     addr = parseaddr(sender_email)[1] or sender_email
@@ -87,7 +87,7 @@ def sender_history(config_dir, sender_email, current_thread_id, profile_email, m
     msgs = lst.get("messages", []) or []
     # Drop the current thread's own messages.
     ids = [m for m in msgs if m.get("threadId") != current_thread_id]
-    tayo_sent = False
+    owner_sent = False
     samples = []
     seen_threads = set()
     for m in ids[:max_msgs * 2]:
@@ -100,14 +100,14 @@ def sender_history(config_dir, sender_email, current_thread_id, profile_email, m
         except Exception:
             continue
         frm = _hdr(full, "from")
-        is_tayo = bool(profile_email and profile_email.lower() in frm.lower())
-        if is_tayo:
-            tayo_sent = True
+        is_owner = bool(profile_email and profile_email.lower() in frm.lower())
+        if is_owner:
+            owner_sent = True
         snip = (full.get("snippet", "") or "")[:160]
-        direction = "Tayo wrote" if is_tayo else "They wrote"
+        direction = "I wrote" if is_owner else "They wrote"
         samples.append(f"- [{_hdr(full,'date')[:16]}] {direction}: {snip}")
         seen_threads.add(full.get("threadId"))
-    has_history = tayo_sent or len(seen_threads) >= 1 and len(samples) >= 2
+    has_history = owner_sent or len(seen_threads) >= 1 and len(samples) >= 2
     summary = "\n".join(samples)
     return has_history, summary
 

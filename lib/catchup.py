@@ -2,8 +2,8 @@
 """Missed-important-items sweep — the "you may have missed this" catch-up.
 
 Scans the inbox over a lookback window for threads where:
-  - the last message is from someone else (not Tayo), and
-  - Tayo never replied (no message from Tayo after theirs), and
+  - the last message is from someone else (not the account owner), and
+  - the owner never replied (no message from the owner after theirs), and
   - it isn't obvious noise (cold sales, automated, newsletters).
 Then asks Haiku to keep only genuinely important, still-actionable items and say why.
 
@@ -41,7 +41,7 @@ def _age_days(date_str):
 
 
 def candidates(config_dir, profile_email, lookback_days):
-    """Inbox threads older than 1d but within lookback, last msg not from Tayo, no Tayo reply."""
+    """Inbox threads older than 1d but within lookback, last msg not from the owner, no owner reply."""
     q = f"in:inbox -in:chats newer_than:{lookback_days}d older_than:1d -label:\"⚡ Action\""
     lst = du._gws(config_dir, ["gmail", "users", "messages", "list", "--params",
                                json.dumps({"userId": "me", "q": q, "maxResults": 60})])
@@ -61,9 +61,9 @@ def candidates(config_dir, profile_email, lookback_days):
         msgs = thread.get("messages", []) or []
         if not msgs:
             continue
-        # Tayo replied if any message is from Tayo.
-        tayo_replied = any(profile_email and profile_email.lower() in _hdr(x, "from").lower() for x in msgs)
-        if tayo_replied:
+        # Owner replied if any message is from the account owner.
+        owner_replied = any(profile_email and profile_email.lower() in _hdr(x, "from").lower() for x in msgs)
+        if owner_replied:
             continue
         last = msgs[-1]
         frm = _hdr(last, "from")
@@ -94,7 +94,7 @@ def filter_important(cands, profile):
         f'{i}. from={c["from"]} | subject={c["subject"]} | {c["age_days"]}d ago | {c["snippet"]}'
         for i, c in enumerate(cands)
     )
-    prompt = f"""From this list of un-replied inbox emails Tayo may have missed, return ONLY the ones that are genuinely important and still worth his attention. EXCLUDE: cold sales/outbound pitches, financing offers, vendor/webinar invites, recruiters, newsletters, marketing, receipts, social notifications, and calendar "Accepted:"/"Declined:"/"Invitation:" auto-confirmations (these need no action), subscription alerts (property/job/price alerts). KEEP things that need action or a human response: payment/billing failures, real two-way threads awaiting Tayo, time-sensitive deadlines, client/partner asks, account/security problems, tax/legal compliance.
+    prompt = f"""From this list of un-replied inbox emails the user may have missed, return ONLY the ones that are genuinely important and still worth their attention. EXCLUDE: cold sales/outbound pitches, financing offers, vendor/webinar invites, recruiters, newsletters, marketing, receipts, social notifications, and calendar "Accepted:"/"Declined:"/"Invitation:" auto-confirmations (these need no action), subscription alerts (property/job/price alerts). KEEP things that need action or a human response: payment/billing failures, real two-way threads awaiting the user, time-sensitive deadlines, client/partner asks, account/security problems, tax/legal compliance.
 
 {profile}
 

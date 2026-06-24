@@ -23,7 +23,7 @@ import thin_protected as tp  # noqa: E402  (reuse the 'updates' query)
 
 CLAUDE = os.environ.get("CLAUDE_BIN", "claude")
 
-PROMPT_HEAD = """You are triaging automated "Updates" emails for Tayo. For EACH numbered email below (you only see sender + subject), decide:
+PROMPT_HEAD = """You are triaging automated "Updates" emails for the user. For EACH numbered email below (you only see sender + subject), decide:
 - "archive" — pure noise that never needs review: content newsletters, blog/news digests, social-network notifications, marketing blasts, surveys, non-actionable app/product announcements.
 - "keep" — ANYTHING that could matter: bills, payments, receipts, orders, deliveries/shipping, travel/flight/booking changes, security/account/login alerts, legal, anything addressed personally or that might need a response. When unsure, KEEP.
 

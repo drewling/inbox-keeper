@@ -49,7 +49,7 @@ def main():
                "from": sender, "subject": subject}
 
         if profile_email and profile_email.lower() in sender.lower():
-            rec.update(needs_reply=False, reason="last message is from Tayo (ball in their court)",
+            rec.update(needs_reply=False, reason="last message is from the account owner (ball in their court)",
                        has_history=None)
             print(json.dumps(rec, ensure_ascii=False)); continue
 

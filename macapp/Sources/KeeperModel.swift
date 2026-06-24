@@ -205,6 +205,7 @@ final class KeeperModel: ObservableObject {
 
     private func finishJob(_ j: Job) async {
         await reload()
+        if j.kind != "refresh" { Haptic.tap() }   // a quiet confirmation on real completions
         let msg: String
         switch j.kind {
         case "run": msg = j.message.isEmpty ? "Inbox updated" : j.message
@@ -229,6 +230,7 @@ final class KeeperModel: ObservableObject {
         Task {
             do {
                 let label = try await api.dismiss(loop, slug: slug)
+                Haptic.tap()
                 toast("Set aside") { [weak self] in self?.restoreThread(loop, slug: slug, label: label) }
                 await reload()   // pull the server's bumped Undo bucket so the count moves now
             } catch {
@@ -262,7 +264,12 @@ final class KeeperModel: ObservableObject {
     /// in-flight edit with a stale read.
     func loadCategories() async {
         guard !categoriesSaving else { return }
-        if let cats = try? await api.categories() { categoriesDraft = cats }
+        do { categoriesDraft = try await api.categories() }
+        catch {
+            // Don't clobber an in-memory edit, but surface a hard failure so an empty
+            // editor isn't mistaken for "no categories".
+            if categoriesDraft.isEmpty { toast("Couldn’t load categories") }
+        }
     }
 
     func addCategory() {
@@ -361,6 +368,7 @@ final class KeeperModel: ObservableObject {
                 try await api.send(slug: row.account.slug, threadId: row.loop.threadId,
                                    toEmail: composerToEmail, subject: composerSubject,
                                    body: text, html: body, original: composerOriginal)
+                Haptic.tap()
                 if state != nil { state!.dropLoop(slug: row.account.slug, threadId: row.loop.threadId) }
                 closeComposer()
                 toast("Reply sent")

@@ -3,9 +3,9 @@
 
 For every reviewable inbox message (excluding starred, Action, last 2 days, and
 high-stakes PROTECT_PATTERNS), feed Haiku sender + subject + replied_before and
-decide keep vs archive. The replied_before signal (has Tayo EVER emailed this
+decide keep vs archive. The replied_before signal (has the owner EVER emailed this
 address) is the key tell for cold outreach: SmartLead/Apollo/Lemlist-style sales
-mail comes from real-looking human names but Tayo never replied to them.
+mail comes from real-looking human names but the owner never replied to them.
 
 Reversible (dated recovery label). Dry-run by default.
 
@@ -24,23 +24,23 @@ CLAUDE = os.environ.get("CLAUDE_BIN", "claude")
 CANDIDATE_Q = f"in:inbox {tp.KEEP} {tp.NOT_PROTECTED}"
 
 PROMPT_HEAD = (
-    "You are AGGRESSIVELY cleaning Tayo's inbox to near-zero. For EACH numbered email you see "
-    "sender + subject + replied_before (whether Tayo has EVER sent mail to this address). Decide "
+    "You are AGGRESSIVELY cleaning the user's inbox to near-zero. For EACH numbered email you see "
+    "sender + subject + replied_before (whether the user has EVER sent mail to this address). Decide "
     '"keep" or "archive". Archive the great majority; only a small genuine core survives.\n\n'
     "The single most important signal is replied_before:\n"
-    "- replied_before=YES: Tayo has a real two-way relationship. If it's an individual person, KEEP.\n"
-    "- replied_before=NO: Tayo has NEVER written to them. This is almost always COLD OUTREACH even "
+    "- replied_before=YES: the user has a real two-way relationship. If it's an individual person, KEEP.\n"
+    "- replied_before=NO: the user has NEVER written to them. This is almost always COLD OUTREACH even "
     "when the sender is a real-looking human name and the subject looks 1:1. Cold-email tools "
     "(SmartLead, Apollo, Lemlist, Instantly) deliberately fake this. Telltale cadence subjects: "
     '"checking in", "Re: Check-In & Catch Up", "following up", "circling back", "bump", "should I '
-    'close the loop?", "quick question", "quick tayo", "worth 15 minutes?", "hop on a call", '
+    'close the loop?", "quick question", "worth 15 minutes?", "hop on a call", '
     '"partnership", "introduction", "requests", "did you see". ARCHIVE all of these.\n\n'
     "KEEP only:\n"
-    "1. An individual person Tayo HAS replied to before (replied_before=YES).\n"
+    "1. An individual person the user HAS replied to before (replied_before=YES).\n"
     "2. Personal or family mail (e.g. surname Onabule, clearly personal), regardless of replied_before.\n"
     "3. An active payment PROBLEM: failed/declined/overdue/can't process/problem with your payment/past-due.\n"
     "4. A legal matter or dispute: courts/justice.gov.uk, debt collection, tenancy deposit, PCN/penalty, adjudication.\n"
-    "5. An explicit deadline/consequence needing Tayo to act/sign/attend.\n\n"
+    "5. An explicit deadline/consequence needing the user to act/sign/attend.\n\n"
     "ARCHIVE everything else, including:\n"
     "- ANY cold outreach/sales/pitch/'let's chat'/vendor prospecting, even from a named person, when "
     "replied_before=NO and it's not clearly personal/family.\n"
@@ -80,7 +80,7 @@ _REPLIED_CACHE = {}
 
 
 def _replied_before(config_dir, sender):
-    """True if Tayo has ever SENT mail to this sender's address (two-way history)."""
+    """True if the owner has ever SENT mail to this sender's address (two-way history)."""
     email = (parseaddr(sender)[1] or "").lower()
     if not email:
         return False

@@ -3,7 +3,7 @@
 
 For the given account, finds recent ⚡ Action threads. For each, gathers context
 (full thread, prior correspondence with the sender, Drewl profile) and asks Haiku
-to BOTH decide whether Tayo genuinely needs to reply AND draft the reply in one
+to BOTH decide whether the account owner genuinely needs to reply AND draft the reply in one
 structured call. Cold sales, financing pitches, vendor invites, and automated mail
 are rejected (no draft). Only genuine, reply-worthy threads produce a Gmail draft
 and a queue entry for Slack review.
@@ -104,9 +104,9 @@ def judge_and_draft(sender, subject, context):
         if context["history_summary"]
         else "PRIOR CORRESPONDENCE with this sender: NONE found — no two-way history."
     )
-    prompt = f"""You decide whether Tayo Onabule genuinely needs to send a written reply to an email thread, and if so, you draft that reply in his voice. Be strict about signal vs noise.
+    prompt = f"""You decide whether the account owner genuinely needs to send a written reply to an email thread, and if so, you draft that reply in their voice. Be strict about signal vs noise.
 
-=== TAYO / DREWL PROFILE & REPLY BOUNDARIES ===
+=== OWNER / DREWL PROFILE & REPLY BOUNDARIES ===
 {context['profile']}
 
 === PRIOR RELATIONSHIP ===
@@ -122,25 +122,25 @@ Subject: {subject}
 The reply will be sent to **{to_name}** ({to_email}) — the person who sent the most
 recent message. Address THIS person by their first name. A thread may mention other
 people (other recipients, people quoted in earlier messages) — do NOT address or
-greet them; they are not the recipient. Tayo is the sender of your reply, never the
+greet them; they are not the recipient. The owner is the sender of your reply, never the
 addressee.
 
 === YOUR TASK ===
 1. Decide needs_reply. Set needs_reply=false (NO draft) when the message is cold sales,
    an outbound pitch, financing/lending/investment, a vendor event/webinar invite from a
-   company Tayo doesn't already work with, recruiting/link-building/guest-post outreach,
+   company the owner doesn't already work with, recruiting/link-building/guest-post outreach,
    an automated notification, or anything where there is no prior two-way history AND they
-   want Tayo to buy/book/invest/"hop on a call". Follow the REPLY BOUNDARIES above exactly.
-   Set needs_reply=true only when a real person Tayo knows or an active client/prospect is
-   genuinely awaiting his response, decision, scheduling, or acknowledgement.
+   want the owner to buy/book/invest/"hop on a call". Follow the REPLY BOUNDARIES above exactly.
+   Set needs_reply=true only when a real person the owner knows or an active client/prospect is
+   genuinely awaiting their response, decision, scheduling, or acknowledgement.
    IMPORTANT recall rule: if has_prior_two_way_history is TRUE and the latest message
-   contains a direct question, request, proposal, or scheduling ask aimed at Tayo, default
+   contains a direct question, request, proposal, or scheduling ask aimed at the owner, default
    to needs_reply=true — this is genuine relationship mail, not cold outreach. (A pure FYI
    notification with no ask, e.g. just sharing a meeting link, can still be needs_reply=false.)
 2. If needs_reply=true, write the reply: British English, first person, warm and concise,
    2-6 sentences, mirror the counterparty's formality, reference real thread context, never
    invent facts/figures/dates — use placeholders like [day]/[time]/[amount] where needed.
-   Sign off as "Tayo".
+   Sign off with the owner's first name.
 
 Output ONLY a JSON object, nothing else:
 {{"needs_reply": true|false, "reason": "<one short phrase>", "reply": "<reply text, or empty string if needs_reply is false>"}}"""
@@ -193,7 +193,7 @@ def main():
         subject = headers.get("subject", "(no subject)")
         snippet = (last.get("snippet", "") or "")[:240]
 
-        # Don't draft if the last message in the thread is from Tayo (ball's in their court).
+        # Don't draft if the last message in the thread is from the owner (ball's in their court).
         if profile_email and profile_email.lower() in sender.lower():
             continue
 

@@ -35,6 +35,11 @@ _ASSET_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=
                 ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml",
                 ".png": "image/png", ".woff2": "font/woff2", ".json": "application/json"}
 
+# Default category appearance — single source of truth; used in _DEFAULT_CATEGORIES
+# and the PUT /api/categories handler.
+DEFAULT_CATEGORY_COLOR = "#5C6BC0"
+DEFAULT_CATEGORY_EMOJI = "🏷️"
+
 # --- single background job slot -------------------------------------------------
 _job_lock = threading.Lock()
 _job = {"id": 0, "kind": None, "state": "idle", "started": 0, "finished": 0,
@@ -775,9 +780,19 @@ class Handler(BaseHTTPRequestHandler):
                 validated.append({
                     "name": name.strip(),
                     "description": str(item.get("description", "")) if item.get("description") is not None else "",
-                    "color": str(item.get("color", "#5C6BC0")) if item.get("color") else "#5C6BC0",
-                    "emoji": str(item.get("emoji", "🏷️")) if item.get("emoji") else "🏷️",
+                    "color": str(item.get("color", DEFAULT_CATEGORY_COLOR)) if item.get("color") else DEFAULT_CATEGORY_COLOR,
+                    "emoji": str(item.get("emoji", DEFAULT_CATEGORY_EMOJI)) if item.get("emoji") else DEFAULT_CATEGORY_EMOJI,
                 })
+            # Union the outgoing label names into the history so that if the user
+            # renames a category, the old Gmail labels are cleaned up on next apply.
+            try:
+                sys.path.insert(0, HERE)
+                import review_open_loops as rol  # noqa: E402
+                old_cats = _read_categories()
+                old_names = {f"{c['emoji']} {c['name']}" for c in old_cats}
+                rol._add_to_label_history(old_names)
+            except Exception:
+                pass
             tmp = CATEGORIES_PATH + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump({"categories": validated}, f, ensure_ascii=False, indent=2)

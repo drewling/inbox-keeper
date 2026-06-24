@@ -45,7 +45,7 @@ def main():
         rows.append((i, h.get("from", ""), h.get("subject", ""), (msg.get("snippet", "") or "")[:120]))
 
     listing = "\n".join(f'{i}. from={f} | subj={s} | {sn}' for i, f, s, sn in rows)
-    prompt = f"""These inbox emails are about to be ARCHIVED as noise. Flag ONLY the ones that look genuinely important or still need Tayo's action (real person awaiting reply, payment/security/legal problem, client/deadline). Ignore newsletters, promos, notifications, receipts, social, cold outreach.
+    prompt = f"""These inbox emails are about to be ARCHIVED as noise. Flag ONLY the ones that look genuinely important or still need the user's action (real person awaiting reply, payment/security/legal problem, client/deadline). Ignore newsletters, promos, notifications, receipts, social, cold outreach.
 
 {ctx.drewl_profile()}
 

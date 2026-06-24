@@ -102,7 +102,11 @@ struct Account: Decodable, Identifiable {
     var archivedCount: Int { undoPoints.reduce(0) { $0 + $1.count } }
 
     enum K: String, CodingKey {
-        case slug, email, short, color, photoURL, ok, error, inboxThreads, unread, partial, loops, undoPoints
+        case slug, email, short, color
+        // .convertFromSnakeCase maps "photo_url" → "photoUrl" (lowercase rl), not
+        // "photoURL", so the key must be spelled the way the strategy produces it.
+        case photoURL = "photoUrl"
+        case ok, error, inboxThreads, unread, partial, loops, undoPoints
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)

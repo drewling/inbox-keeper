@@ -12,9 +12,12 @@ extension Color {
         self.init(.sRGB, red: r, green: g, blue: b, opacity: a)
     }
     /// Parse "#RRGGBB" (the per-account / per-category color the server hands us).
+    /// Malformed input (a bad ColorPicker round-trip, hand-edited JSON) falls back to
+    /// a neutral indigo rather than rendering an invisible black tag on dark glass.
     init(hex: String) {
-        let s = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
-        var v: UInt64 = 0; Scanner(string: s).scanHexInt64(&v)
+        let s = hex.trimmingCharacters(in: CharacterSet(charactersIn: " #"))
+        var v: UInt64 = 0
+        if !(s.count == 6 && Scanner(string: s).scanHexInt64(&v)) { v = 0x5C6BC0 }
         self.init(Double((v >> 16) & 0xff) / 255, Double((v >> 8) & 0xff) / 255, Double(v & 0xff) / 255)
     }
     /// "#RRGGBB" for round-tripping a ColorPicker selection back to the server.
@@ -97,7 +100,13 @@ struct PrimaryButtonStyle: ButtonStyle {
                                                      startPoint: .top, endPoint: .bottom), lineWidth: 0.75))
                     .shadow(color: Paper.accent.opacity(configuration.isPressed ? 0 : 0.35), radius: 8, y: 2)
             )
+            .overlay(   // a brief inner bloom of light as the glass is pressed
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(.white).opacity(configuration.isPressed ? 0.14 : 0).blendMode(.plusLighter)
+                    .allowsHitTesting(false))
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
             .opacity(enabled ? 1 : 0.5)
+            .animation(.spring(response: 0.26, dampingFraction: 0.62), value: configuration.isPressed)
             .contentShape(Rectangle())
     }
 }
@@ -111,6 +120,8 @@ struct GhostButtonStyle: ButtonStyle {
             .foregroundStyle(Paper.ink2)
             .padding(.horizontal, 13).frame(height: 30)
             .glassSurface(8, interactive: true)
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .animation(.spring(response: 0.26, dampingFraction: 0.62), value: configuration.isPressed)
             .contentShape(Rectangle())
     }
 }
@@ -123,13 +134,17 @@ struct Avatar: View {
     let color: Color
     var photoURL: String? = nil
     var size: CGFloat = 26
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         ZStack {
             initials                                   // always behind, so it shows while loading
             if let s = photoURL, let url = URL(string: s) {
-                AsyncImage(url: url) { phase in
+                // The real photo blooms in over the initials — a soft scale + fade so
+                // a face arriving feels like it settles into the glass, not a hard swap.
+                AsyncImage(url: url, transaction: Transaction(animation: reduceMotion ? nil : Motion.settle)) { phase in
                     if case .success(let img) = phase {
-                        img.resizable().scaledToFill().transition(.opacity)
+                        img.resizable().scaledToFill()
+                            .transition(.opacity.combined(with: .scale(scale: 0.9)))
                     }
                 }
             }
@@ -148,17 +163,87 @@ struct Avatar: View {
 }
 
 // A small coloured tag marking which category the keeper sorted an open loop into.
+// When it first appears it springs in and a single specular band sweeps across it,
+// so the tag reads as a chip of tinted glass catching the light once.
 struct CategoryTag: View {
     let category: Category
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var sheen = false
     var body: some View {
+        let c = Color(hex: category.color)
         HStack(spacing: 3) {
             Text(category.emoji).font(.system(size: 8.5))
             Text(category.name).font(.system(size: 10, weight: .semibold)).lineLimit(1)
         }
-        .foregroundStyle(Color(hex: category.color))
+        .foregroundStyle(c)
         .padding(.horizontal, 6).padding(.vertical, 2.5)
-        .background(Capsule().fill(Color(hex: category.color).opacity(0.16)))
-        .overlay(Capsule().strokeBorder(Color(hex: category.color).opacity(0.30), lineWidth: 0.5))
+        .background(Capsule().fill(c.opacity(0.16)))
+        .overlay(Capsule().strokeBorder(c.opacity(0.30), lineWidth: 0.5))
+        .overlay(   // one-time specular sweep on appear
+            GeometryReader { geo in
+                Capsule().fill(LinearGradient(colors: [.clear, .white.opacity(0.55), .clear],
+                                              startPoint: .leading, endPoint: .trailing))
+                    .frame(width: geo.size.width * 0.5)
+                    .offset(x: sheen ? geo.size.width * 1.2 : -geo.size.width * 0.7)
+                    .blendMode(.plusLighter).allowsHitTesting(false)
+            }
+            .clipShape(Capsule())
+        )
         .fixedSize()
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.7).delay(0.15)) { sheen = true }
+        }
+    }
+}
+
+// MARK: - Motion & delight vocabulary
+// A few shared springs so every delightful moment feels cut from the same glass.
+// Callers gate the showier ones on reduce-motion.
+enum Motion {
+    static let pop    = Animation.spring(response: 0.30, dampingFraction: 0.68)   // tags, avatars, checks
+    static let sweep  = Animation.spring(response: 0.40, dampingFraction: 0.82)   // rows leaving / arriving
+    static let morph  = Animation.spring(response: 0.34, dampingFraction: 0.80)   // glass tab selector
+    static let settle = Animation.spring(response: 0.52, dampingFraction: 0.88)   // counts, panels
+}
+
+/// A whisper of trackpad haptic for the moments that *commit* something (set aside,
+/// send, restore). No-ops on hardware without a Force Touch trackpad — never a
+/// reason to feel it twice, so it's deliberately sparse.
+enum Haptic {
+    static func tap() {
+        NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
+    }
+}
+
+/// A slow specular band travelling across a surface — used for the "drafting…" and
+/// skeleton placeholders so waiting reads as light moving over glass, not a dead
+/// spinner. Clips itself to a rounded rect so callers don't have to.
+struct Shimmer: ViewModifier {
+    var radius: CGFloat = 8
+    var active: Bool = true
+    @State private var phase: CGFloat = -1
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    func body(content: Content) -> some View {
+        content
+            .overlay(
+                GeometryReader { geo in
+                    LinearGradient(colors: [.clear, Paper.hairline.opacity(0.22), .clear],
+                                   startPoint: .leading, endPoint: .trailing)
+                        .frame(width: geo.size.width * 0.55)
+                        .offset(x: phase * geo.size.width * 1.7)
+                        .blendMode(.plusLighter).allowsHitTesting(false)
+                }
+            )
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .onAppear {
+                guard active, !reduceMotion else { return }
+                withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) { phase = 1 }
+            }
+    }
+}
+extension View {
+    func shimmer(radius: CGFloat = 8, active: Bool = true) -> some View {
+        modifier(Shimmer(radius: radius, active: active))
     }
 }

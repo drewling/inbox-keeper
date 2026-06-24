@@ -43,6 +43,9 @@ import learning               # noqa: E402
 # Path to the categories config file (root of the repo).
 _CATEGORIES_PATH = os.path.join(ROOT, "categories.json")
 
+# Log People API photo failures at most once per process.
+_photo_failure_logged = False
+
 # Google-style multicolor avatar palette (white initials sit on each). No orange.
 # Indexed by slug: blue, red, green, purple, teal, indigo.
 _PALETTE = ["#4285F4", "#DB4437", "#0F9D58", "#AB47BC", "#00838F", "#5C6BC0"]
@@ -98,7 +101,9 @@ def _photo_url(cfg):
     """Fetch the account's Google profile photo URL via the People API.
 
     Returns a URL string, or None if unavailable (non-fatal).
+    Logs the first failure per process to stderr with a diagnostic hint.
     """
+    global _photo_failure_logged
     try:
         d = du._gws(cfg, ["people", "people", "get",
                           "--params", json.dumps({"resourceName": "people/me",
@@ -108,7 +113,11 @@ def _photo_url(cfg):
         primary = next((p for p in photos if p.get("metadata", {}).get("primary")), None)
         chosen = primary or (photos[0] if photos else None)
         return chosen["url"] if chosen else None
-    except Exception:
+    except Exception as exc:
+        if not _photo_failure_logged:
+            _photo_failure_logged = True
+            print(f"[inbox-keeper] profile photo unavailable (People API scope?): {exc}",
+                  file=sys.stderr)
         return None
 
 
