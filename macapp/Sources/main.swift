@@ -348,6 +348,10 @@ final class AppController: NSObject, NSApplicationDelegate {
         env["GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND"] = "file"
         env["KEEPER_PORT"] = PORT
         env["MAIL_TRIAGE_DIR"] = root
+        // gws uses per-account keyring creds, never a global token. Strip any stray
+        // GOOGLE_WORKSPACE_CLI_TOKEN (e.g. exported from the user's shell) so it can't
+        // poison the Authorization header and break every account.
+        env.removeValue(forKey: "GOOGLE_WORKSPACE_CLI_TOKEN")
         p.environment = env
         p.currentDirectoryURL = URL(fileURLWithPath: root)
         do {

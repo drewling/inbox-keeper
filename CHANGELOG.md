@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-06-24
+
+### Fixed
+
+- zero now strips a stray `GOOGLE_WORKSPACE_CLI_TOKEN` from the environment before invoking `gws`, in the server, the spawned gws environment, and `bin/zero`. If that variable was set (for example exported from a shell profile), gws treated its value as a pre-obtained access token; a malformed value broke every account with `HTTP request failed: builder error: failed to parse header value`. zero uses per-account keyring credentials and never a global token, so it drops the variable defensively.
+
 ## [1.4.0] - 2026-06-24
 
 ### Changed

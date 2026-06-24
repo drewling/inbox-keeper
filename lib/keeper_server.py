@@ -31,6 +31,13 @@ _DATE_RE = re.compile(r"^\d{4}/\d{2}/\d{2}$")
 PYTHON = sys.executable or "python3"
 CLAUDE = os.environ.get("CLAUDE_BIN", "claude")
 
+# gws reads per-account credentials from its keyring/config dir; this app never uses
+# a pre-obtained global token. A stray GOOGLE_WORKSPACE_CLI_TOKEN in the environment
+# (e.g. exported from a shell profile) is treated by gws as the access token and, if
+# malformed, breaks every call with "failed to parse header value". Drop it so the
+# server and every gws subprocess it spawns are immune, however the server was launched.
+os.environ.pop("GOOGLE_WORKSPACE_CLI_TOKEN", None)
+
 # Default category appearance — single source of truth; used in _DEFAULT_CATEGORIES
 # and the PUT /api/categories handler.
 DEFAULT_CATEGORY_COLOR = "#5C6BC0"

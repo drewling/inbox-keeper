@@ -7,6 +7,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../config.sh
 source "$SCRIPT_DIR/../config.sh"
 
+# gws uses per-account keyring creds; a stray GOOGLE_WORKSPACE_CLI_TOKEN (often
+# exported from a shell profile) is read as the access token and breaks every call.
+unset GOOGLE_WORKSPACE_CLI_TOKEN
+
 SUBCOMMAND="${1:-}"
 
 case "$SUBCOMMAND" in
