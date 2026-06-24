@@ -1,11 +1,13 @@
 // inbox-keeper — macOS menu-bar shell.
 //
 // Lives in the menu bar (no Dock icon). Shows the web panel in a borderless
-// floating window we draw ourselves: an opaque paper bubble with a paper arrow
-// pointing up at the menu-bar item. Drawing it ourselves (rather than NSPopover)
-// gives full control of the arrow colour and the corner radius, with no system
-// vibrancy material that we can't tint. The content is opaque so it can never
-// render blank. Starts the local panel server on launch, kills it on quit.
+// floating window with a native "Liquid Glass" surface: a real
+// NSVisualEffectView vibrancy material, masked to a rounded bubble with an arrow
+// pointing up at the menu-bar item, with a transparent WKWebView on top so the
+// glass shows through the panel's translucent surfaces. No hand-tinted bitmap —
+// the material is the surface, the window shadow defines the edge. The content
+// (ink text on a light frost) is always legible, so it can never read as blank.
+// Starts the local panel server on launch, kills it on quit.
 
 import AppKit
 import WebKit
@@ -18,9 +20,6 @@ let ARROW_H: CGFloat = 9
 let ARROW_W: CGFloat = 22
 let CORNER: CGFloat = 13
 let GAP: CGFloat = 1            // arrow tip to the menu bar
-// Matches CSS --paper: oklch(98.6% 0.006 75).
-let PAPER = NSColor(srgbRed: 0.974, green: 0.957, blue: 0.930, alpha: 1)
-let HAIRLINE = NSColor(srgbRed: 0.88, green: 0.866, blue: 0.84, alpha: 1)
 
 func resolveRepoRoot() -> String? {
     let fm = FileManager.default
@@ -51,10 +50,28 @@ func augmentedPath() -> String {
     return parts.joined(separator: ":")
 }
 
-// The paper bubble + upward arrow. Drawn (not layer-filled) so the window shadow
-// follows the bubble silhouette including the arrow.
+// The glass bubble + upward arrow. A native NSVisualEffectView fills the view and
+// is masked to the bubble silhouette, so the live vibrancy material (and the
+// window shadow that follows it) takes the bubble + arrow shape. The web content
+// sits on top in a transparent web view.
 final class BubbleView: NSView {
-    var arrowX: CGFloat = PANEL_W - 40 { didSet { needsDisplay = true } }
+    let effect = NSVisualEffectView()
+    var arrowX: CGFloat = PANEL_W - 40 { didSet { if oldValue != arrowX { applyMask() } } }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        effect.material = .popover          // the macOS "Liquid Glass" popover material
+        effect.blendingMode = .behindWindow
+        effect.state = .active
+        // Keep the glass light to match the panel's light-only design, even in dark mode.
+        effect.appearance = NSAppearance(named: .aqua)
+        effect.frame = bounds
+        effect.autoresizingMask = [.width, .height]
+        addSubview(effect)
+        applyMask()
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) unused") }
 
     private func bubblePath() -> NSBezierPath {
         let bodyTop = bounds.height - ARROW_H
@@ -69,13 +86,32 @@ final class BubbleView: NSView {
         return path
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        let path = bubblePath()
-        PAPER.setFill()
-        path.fill()
-        HAIRLINE.setStroke()
-        path.lineWidth = 0.5
-        path.stroke()
+    // Re-mask at the new scale when moving between displays of different density.
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        applyMask()
+    }
+
+    // Mask the vibrancy material to the bubble shape. Rasterized at the display's
+    // backing scale so the rounded corners, the arrow, and the shadow edge that
+    // follows them stay crisp on Retina.
+    private func applyMask() {
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        let scale = window?.backingScaleFactor ?? 2
+        let pw = Int((bounds.width * scale).rounded())
+        let ph = Int((bounds.height * scale).rounded())
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pw, pixelsHigh: ph,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return }
+        rep.size = bounds.size   // points; the context scales point-space drawing up to pixels
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSColor.black.setFill()
+        bubblePath().fill()
+        NSGraphicsContext.restoreGraphicsState()
+        let img = NSImage(size: bounds.size)
+        img.addRepresentation(rep)
+        effect.maskImage = img
     }
 }
 
@@ -123,7 +159,9 @@ final class AppController: NSObject, NSApplicationDelegate, WKNavigationDelegate
         webView.wantsLayer = true
         webView.layer?.cornerRadius = CORNER
         webView.layer?.masksToBounds = true
-        webView.setValue(true, forKey: "drawsBackground")   // opaque paper — never blank
+        webView.layer?.backgroundColor = .clear
+        // Transparent so the page's translucent surfaces sit on the glass material.
+        webView.setValue(false, forKey: "drawsBackground")
         bubble.addSubview(webView)
 
         panel = KeyablePanel(contentRect: total,

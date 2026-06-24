@@ -21,6 +21,14 @@ swiftc -O \
 
 cp "$HERE/Info.plist" "$APP/Contents/Info.plist"
 
+# App icon: draw it natively (deterministic, on-brand, no external image gen),
+# compile the .iconset into AppIcon.icns, and drop it in Resources.
+echo "Drawing app icon ..."
+ICONSET="$HERE/build/AppIcon.iconset"
+rm -rf "$ICONSET"
+swift "$HERE/make_icon.swift" "$ICONSET" >/dev/null
+iconutil -c icns "$ICONSET" -o "$RES/AppIcon.icns"
+
 # Ad-hoc code signature so Gatekeeper lets a locally built app run.
 codesign --force --deep --sign - "$APP" 2>/dev/null || \
   echo "  (codesign skipped — app still runs locally)"

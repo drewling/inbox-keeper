@@ -62,13 +62,33 @@ body {
   position: relative;
 }
 
-/* Inside the native window the bubble provides the rounded shape + arrow, so the
-   web surface fills it edge-to-edge on a solid paper background. */
-html.in-app, html.in-app body { background: var(--paper); }
+/* Inside the native window the panel sits on a live "Liquid Glass" vibrancy
+   material. Surfaces go translucent so the glass shows through, while ink text
+   stays fully opaque for legibility. The plain browser dashboard (no .in-app)
+   keeps the solid warm-paper look above. */
+html.in-app, html.in-app body { background: transparent; }
 html.in-app .panel {
   width: 100%; height: 100vh; margin: 0;
   border: 0; border-radius: 0;
+  /* A whisper of warm tint over the glass — keeps the brand character and text
+     contrast without hiding the material. */
+  background: linear-gradient(180deg,
+      oklch(98.6% 0.006 75 / 0.30), oklch(96.5% 0.008 73 / 0.44));
 }
+html.in-app .topbar {
+  background: oklch(98% 0.007 74 / 0.34);
+  border-bottom-color: oklch(78% 0.012 68 / 0.32);
+}
+/* Soften the few solid surfaces so the glass reads through them too. */
+html.in-app .acct-card,
+html.in-app .composer { background: oklch(97% 0.007 73 / 0.55); }
+html.in-app .composer-head,
+html.in-app .composer-toolbar { background: oklch(96% 0.008 72 / 0.45); }
+html.in-app .row:hover { background: oklch(96% 0.008 72 / 0.55); }
+html.in-app .learned-body pre,
+html.in-app .policy-note pre { background: oklch(96% 0.008 72 / 0.5); }
+/* Scrollbar gutter is transparent so no opaque paper slivers show on the glass. */
+html.in-app .view::-webkit-scrollbar-thumb { border-color: transparent; }
 
 /* ---- top bar ---------------------------------------------------------- */
 .topbar {
