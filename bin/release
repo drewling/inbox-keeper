@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bin/release — tag and publish a new inbox-keeper release
+# bin/release — tag and publish a new zero release
 # Usage: bin/release <version>   e.g.  bin/release 1.2.0
 set -euo pipefail
 
@@ -14,7 +14,7 @@ if [[ -z "$VERSION" ]]; then
 fi
 TAG="v${VERSION}"
 
-echo "==> Releasing inbox-keeper ${TAG}"
+echo "==> Releasing zero ${TAG}"
 
 # ── 2. Clean working tree on master ─────────────────────────────────────────
 echo "==> Checking working tree..."
@@ -39,13 +39,13 @@ if ! grep -qE "^## \[${VERSION}\]" "$CHANGELOG"; then
 fi
 
 # ── 4. Build the app and DMG ─────────────────────────────────────────────────
-echo "==> Building inbox-keeper.app..."
+echo "==> Building zero.app..."
 bash "$REPO_ROOT/macapp/build.sh"
 
-echo "==> Building inbox-keeper.dmg..."
+echo "==> Building zero.dmg..."
 bash "$REPO_ROOT/macapp/make-dmg.sh"
 
-DMG="$REPO_ROOT/macapp/build/inbox-keeper.dmg"
+DMG="$REPO_ROOT/macapp/build/zero.dmg"
 if [[ ! -f "$DMG" ]]; then
   echo "ERROR: DMG not found at $DMG after build." >&2
   exit 1
@@ -53,7 +53,7 @@ fi
 
 # ── 5. Extract release notes for this version ───────────────────────────────
 echo "==> Extracting release notes for ${VERSION}..."
-NOTES_FILE="$(mktemp /tmp/inbox-keeper-release-notes.XXXXXX.md)"
+NOTES_FILE="$(mktemp /tmp/zero-release-notes.XXXXXX.md)"
 trap 'rm -f "$NOTES_FILE"' EXIT
 
 # Grab lines between ## [VERSION] and the next ## [ heading (exclusive).
@@ -70,7 +70,7 @@ echo "==> Creating tag ${TAG}..."
 if git -C "$REPO_ROOT" rev-parse "$TAG" >/dev/null 2>&1; then
   echo "WARNING: tag ${TAG} already exists locally — skipping tag creation."
 else
-  git -C "$REPO_ROOT" tag -a "$TAG" -m "inbox-keeper ${VERSION}"
+  git -C "$REPO_ROOT" tag -a "$TAG" -m "zero ${VERSION}"
 fi
 
 echo "==> Pushing tag ${TAG} to origin..."
@@ -79,19 +79,19 @@ git -C "$REPO_ROOT" push origin "$TAG"
 # ── 7. Create GitHub release ─────────────────────────────────────────────────
 echo "==> Creating GitHub release ${TAG}..."
 RELEASE_URL="$(gh release create "$TAG" "$DMG" \
-  --title "inbox-keeper ${VERSION}" \
+  --title "zero ${VERSION}" \
   --notes-file "$NOTES_FILE" \
-  --repo drewling/inbox-keeper)"
+  --repo drewling/zero)"
 
 # ── 8. Install locally over /Applications ────────────────────────────────────
 # bin/release only publishes the DMG; the user's running app stays stale until
 # swapped. Do it here so every release lands in the app they actually use.
-APP_SRC="$REPO_ROOT/macapp/build/inbox-keeper.app"
-APP_DST="/Applications/inbox-keeper.app"
+APP_SRC="$REPO_ROOT/macapp/build/zero.app"
+APP_DST="/Applications/zero.app"
 if [[ -d "$APP_SRC" ]]; then
   echo "==> Installing ${TAG} to ${APP_DST}..."
-  osascript -e 'tell application "inbox-keeper" to quit' >/dev/null 2>&1 || true
-  pkill -x inbox-keeper >/dev/null 2>&1 || true
+  osascript -e 'tell application "zero" to quit' >/dev/null 2>&1 || true
+  pkill -x zero >/dev/null 2>&1 || true
   rm -rf "$APP_DST"
   cp -R "$APP_SRC" "$APP_DST"
   open "$APP_DST"

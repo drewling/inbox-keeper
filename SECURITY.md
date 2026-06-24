@@ -4,10 +4,10 @@
 
 Please do not file public GitHub issues for security vulnerabilities.
 
-**Preferred:** Open a [private security advisory](https://github.com/drewling/inbox-keeper/security/advisories/new)
+**Preferred:** Open a [private security advisory](https://github.com/drewling/zero/security/advisories/new)
 on GitHub. This keeps the details confidential until a fix is ready.
 
-**Alternative:** Email [tayo@drewl.com](mailto:tayo@drewl.com) with "inbox-keeper
+**Alternative:** Email [tayo@drewl.com](mailto:tayo@drewl.com) with "zero
 security" in the subject line. Include a description of the issue, steps to
 reproduce, and your assessment of impact.
 
@@ -28,24 +28,24 @@ In scope:
 
 Out of scope:
 
-- Attacks that require physical access to the user's machine (inbox-keeper has no
+- Attacks that require physical access to the user's machine (zero has no
   network-facing surface)
 - Issues in the `gws` CLI, `claude` CLI, or Gmail itself (report those upstream)
 - Theoretical issues without a plausible attack path
 
-## What inbox-keeper does (and does not) do with your mail
+## What zero does (and does not) do with your mail
 
-**inbox-keeper never deletes mail.** The only Gmail operations it performs are
+**zero never deletes mail.** The only Gmail operations it performs are
 label additions and removals via the `gws` CLI. "Archive" means removing the INBOX
 label and adding a dated recovery label. Everything remains in All Mail, fully
 searchable and fully restorable.
 
 **Everything runs on your machine.** The local server binds to `127.0.0.1` only.
 No mail content, OAuth tokens, or personal data is transmitted to any server
-operated by the inbox-keeper project or by Anthropic beyond what the `claude` CLI
+operated by the zero project or by Anthropic beyond what the `claude` CLI
 normally does when you call it (per-thread text is sent to the Claude API for
 classification; review Anthropic's privacy policy for details).
 
-**Your credentials stay in your existing tools.** inbox-keeper authenticates with
-Gmail through the `gws` CLI, which manages your OAuth tokens. inbox-keeper never
+**Your credentials stay in your existing tools.** zero authenticates with
+Gmail through the `gws` CLI, which manages your OAuth tokens. zero never
 reads or stores your Google password or OAuth tokens directly.

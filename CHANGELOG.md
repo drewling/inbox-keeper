@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to inbox-keeper are documented in this file.
+All notable changes to zero are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- The legacy browser web panel (`app/panel/`) and its `bin/inbox-keeper dashboard` command. The native macOS app is now the sole front-end; `keeper_server.py` remains as its JSON API backend. Also removed two unused review scripts and de-duplicated the category defaults shared by the server and dashboard state.
+- The legacy browser web panel (`app/panel/`) and its `bin/zero dashboard` command. The native macOS app is now the sole front-end; `keeper_server.py` remains as its JSON API backend. Also removed two unused review scripts and de-duplicated the category defaults shared by the server and dashboard state.
 
 ## [1.2.0] - 2026-06-24
 
@@ -67,6 +67,6 @@ Initial public release.
 - Native macOS 26 Liquid Glass menu-bar app with a popover panel.
 - `.dmg` installer with guided onboarding for first-time setup.
 
-[Unreleased]: https://github.com/drewling/inbox-keeper/compare/v1.0.0...HEAD
-[1.1.0]: https://github.com/drewling/inbox-keeper/compare/v1.0.0...v1.1.0
-[1.0.0]: https://github.com/drewling/inbox-keeper/releases/tag/v1.0.0
+[Unreleased]: https://github.com/drewling/zero/compare/v1.0.0...HEAD
+[1.1.0]: https://github.com/drewling/zero/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/drewling/zero/releases/tag/v1.0.0

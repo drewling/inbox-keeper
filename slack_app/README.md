@@ -86,8 +86,8 @@ Create `~/Library/LaunchAgents/com.mailtriage.slackapp.plist`:
   <string>com.mailtriage.slackapp</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/YOUR_USERNAME/inbox-keeper/slack_app/.venv/bin/python</string>
-    <string>/Users/YOUR_USERNAME/inbox-keeper/slack_app/app.py</string>
+    <string>/Users/YOUR_USERNAME/zero/slack_app/.venv/bin/python</string>
+    <string>/Users/YOUR_USERNAME/zero/slack_app/app.py</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>

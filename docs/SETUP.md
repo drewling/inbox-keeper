@@ -1,8 +1,8 @@
 # Detailed Setup Guide
 
 > **Legacy.** This covers the original Slack-based triage pipeline. For the current
-> product (the inbox-keeper menu-bar app) use the README: `./install.sh`, then
-> `./bin/inbox-keeper app`. Keep reading only if you want the opt-in Slack/draft flow.
+> product (the zero menu-bar app) use the README: `./install.sh`, then
+> `./bin/zero app`. Keep reading only if you want the opt-in Slack/draft flow.
 
 This guide walks through setting up mail-triage from scratch on a new macOS machine.
 
@@ -42,8 +42,8 @@ brew install jq
 ## 2. Clone the repo
 
 ```bash
-git clone https://github.com/drewling/inbox-keeper.git ~/inbox-keeper
-cd ~/inbox-keeper
+git clone https://github.com/drewling/zero.git ~/zero
+cd ~/zero
 ```
 
 The repo root is the only path that matters. Everything else is relative.

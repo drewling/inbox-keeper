@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# install.sh — Set up inbox-keeper on a new machine.
+# install.sh — Set up zero on a new machine.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "=== inbox-keeper install ==="
+echo "=== zero install ==="
 echo ""
 
 # ---------------------------------------------------------------------------
@@ -53,7 +53,7 @@ echo ""
 # 3. Build the menu-bar app (only if swift is available)
 # ---------------------------------------------------------------------------
 if command -v swiftc >/dev/null 2>&1; then
-  echo "swift found — building inbox-keeper.app..."
+  echo "swift found — building zero.app..."
   bash "$REPO_DIR/macapp/build.sh"
 else
   echo "swiftc not found — skipping menu-bar app build (run macapp/build.sh when Xcode CLT is installed)."
@@ -64,8 +64,8 @@ echo ""
 # ---------------------------------------------------------------------------
 # 4. Make the CLI executable
 # ---------------------------------------------------------------------------
-chmod +x "$REPO_DIR/bin/inbox-keeper"
-echo "bin/inbox-keeper is now executable."
+chmod +x "$REPO_DIR/bin/zero"
+echo "bin/zero is now executable."
 
 echo ""
 
@@ -78,13 +78,13 @@ cat <<'NEXT'
 1. Edit accounts.json with your real gws config_dir paths (if you haven't already).
 
 2. Open the native menu-bar app (requires the build step above):
-     ./bin/inbox-keeper app
+     ./bin/zero app
 
 3. Run the keeper across all accounts now:
-     ./bin/inbox-keeper run
+     ./bin/zero run
 
 4. Have it run automatically every morning (07:00):
-     ./bin/inbox-keeper schedule
+     ./bin/zero schedule
 
 (The Slack draft-review pipeline is optional and legacy; see docs/SETUP.md and
 deploy/install.sh only if you specifically want it.)

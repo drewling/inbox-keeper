@@ -1,4 +1,4 @@
-// inbox-keeper — macOS menu-bar app.
+// zero — macOS menu-bar app.
 //
 // Lives in the menu bar (no Dock icon). The panel is fully native SwiftUI hosted
 // inside a real macOS 26 "Liquid Glass" surface (NSGlassEffectView) — not a web
@@ -46,7 +46,7 @@ func resolveRepoRoot() -> String? {
 /// here so updates never clobber accounts, policy, learning, or state.
 func supportDirURL() -> URL {
     FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Application Support/inbox-keeper", isDirectory: true)
+        .appendingPathComponent("Library/Application Support/zero", isDirectory: true)
 }
 
 /// Copy the bundled `Contents/Resources/payload` into the support dir. Pure code is
@@ -58,6 +58,13 @@ private func seedFromBundle() -> String? {
     let payload = res.appendingPathComponent("payload", isDirectory: true)
     guard fm.fileExists(atPath: payload.appendingPathComponent("lib/keeper_server.py").path) else { return nil }
     let support = supportDirURL()
+    // One-time migration from the pre-rename support dir, so existing users keep
+    // their accounts, policy, learning, and state across the inbox-keeper→zero rename.
+    let legacy = fm.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/inbox-keeper", isDirectory: true)
+    if !fm.fileExists(atPath: support.path), fm.fileExists(atPath: legacy.path) {
+        try? fm.moveItem(at: legacy, to: support)
+    }
     try? fm.createDirectory(at: support, withIntermediateDirectories: true)
 
     func overwrite(_ rel: String) {
@@ -251,7 +258,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     func setupStatusItem() {
         if let button = statusItem.button {
-            let img = NSImage(systemSymbolName: "tray.full", accessibilityDescription: "inbox-keeper")
+            let img = NSImage(systemSymbolName: "tray.full", accessibilityDescription: "zero")
             img?.isTemplate = true
             button.image = img
             button.action = #selector(togglePanel)

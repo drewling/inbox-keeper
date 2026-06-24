@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local HTTP server behind the inbox-keeper menu-bar panel.
+"""Local HTTP server behind the zero menu-bar panel.
 
 Stdlib only (no dependencies) so the open-source install stays trivial. Binds to
 127.0.0.1 and exposes a small JSON API:
@@ -356,7 +356,7 @@ _GMAIL_SYSTEM_IDS = frozenset({
     "CATEGORY_UPDATES", "CATEGORY_FORUMS",
 })
 
-# Legacy unified-taxonomy labels created by earlier inbox-keeper versions
+# Legacy unified-taxonomy labels created by earlier zero versions
 # (before per-user categories were introduced). Source: TRIAGE.md + demote_automated.py.
 _LEGACY_LABELS = frozenset({
     "⚡ Action",
@@ -370,7 +370,7 @@ _LEGACY_LABELS = frozenset({
 
 
 def _is_ours(name, category_label_names, label_history):
-    """Return True if a label was created by inbox-keeper."""
+    """Return True if a label was created by zero."""
     import inbox_zero as iz  # noqa: E402
     if name.startswith(iz._BASE_LABEL):
         return True
@@ -864,7 +864,7 @@ def _start_job(kind, payload):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "inbox-keeper/1.0"
+    server_version = "zero/1.0"
 
     def log_message(self, *args):
         pass  # quiet
@@ -1086,7 +1086,7 @@ def main():
             # a skeleton until /api/refresh succeeds; make the cause visible in logs.
             print(f"warning: initial state build failed: {exc}", file=sys.stderr)
     httpd = ThreadingHTTPServer((host, port), Handler)
-    print(f"inbox-keeper API on http://{host}:{port}")
+    print(f"zero API on http://{host}:{port}")
     sys.stdout.flush()
     try:
         httpd.serve_forever()

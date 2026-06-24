@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Package inbox-keeper.app into a distributable compressed DMG.
+# Package zero.app into a distributable compressed DMG.
 # Requires the app to already be built (run build.sh first).
-# Output: macapp/build/inbox-keeper.dmg
+# Output: macapp/build/zero.dmg
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD="$HERE/build"
-APP="$BUILD/inbox-keeper.app"
-DMG="$BUILD/inbox-keeper.dmg"
+APP="$BUILD/zero.app"
+DMG="$BUILD/zero.dmg"
 STAGING="$BUILD/dmg-staging"
-VOLUME_NAME="inbox-keeper"
+VOLUME_NAME="zero"
 
 # Sanity check
 if [ ! -d "$APP" ]; then
@@ -25,7 +25,7 @@ rm -f "$DMG"
 mkdir -p "$STAGING"
 
 # Populate staging: the app + an Applications symlink for drag-install
-cp -R "$APP" "$STAGING/inbox-keeper.app"
+cp -R "$APP" "$STAGING/zero.app"
 ln -s /Applications "$STAGING/Applications"
 
 # Create a compressed, read-only DMG from the staging folder

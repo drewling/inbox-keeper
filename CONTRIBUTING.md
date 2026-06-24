@@ -1,12 +1,12 @@
-# Contributing to inbox-keeper
+# Contributing to zero
 
-Thanks for your interest. inbox-keeper is a focused tool with a clear scope:
+Thanks for your interest. zero is a focused tool with a clear scope:
 keep your inbox at "only what still needs you" and never lose anything. The best
 contributions stay true to that one job.
 
 ## License note
 
-inbox-keeper is published under the [PolyForm Noncommercial 1.0.0](LICENSE)
+zero is published under the [PolyForm Noncommercial 1.0.0](LICENSE)
 license. By contributing, you agree that your changes will be distributed under
 the same terms. This means the project -- and your contribution -- may not be used
 commercially or resold. If that is a concern, please raise it before putting in
@@ -26,13 +26,13 @@ the work.
 
 ```bash
 cd macapp
-./build.sh          # compiles inbox-keeper.app into macapp/build/
+./build.sh          # compiles zero.app into macapp/build/
 ```
 
 To produce a distributable disk image:
 
 ```bash
-./make-dmg.sh       # produces inbox-keeper.dmg in macapp/
+./make-dmg.sh       # produces zero.dmg in macapp/
 ```
 
 ### Run the server standalone (faster dev loop)
@@ -45,7 +45,7 @@ python3 lib/keeper_server.py
 ```
 
 The server binds to 127.0.0.1 and serves the JSON API the native app uses.
-Use `./bin/inbox-keeper run` to trigger a sweep from the command line, or `POST
+Use `./bin/zero run` to trigger a sweep from the command line, or `POST
 /api/run` to the server.
 
 For Gmail operations you need `accounts.json` configured (see the

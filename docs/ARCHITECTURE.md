@@ -1,7 +1,7 @@
 # Architecture
 
 > **Legacy.** Describes the original Slack-based triage runtime. The current product
-> is the inbox-keeper menu-bar app (Swift shell + local `lib/keeper_server.py` + web
+> is the zero menu-bar app (Swift shell + local `lib/keeper_server.py` + web
 > panel); see the README and PRODUCT.md. This document covers the opt-in Slack pipeline.
 
 ## Overview

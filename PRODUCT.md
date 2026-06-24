@@ -85,8 +85,8 @@ Saying no is the whole discipline. Out of scope, on purpose:
 The bar is "Granola to set up," not "clone and configure five files."
 
 ```
-$ npx inbox-keeper init        # opens browser, sign in, done
-$ npx inbox-keeper add-account # one command per extra account
+$ npx zero init        # opens browser, sign in, done
+$ npx zero add-account # one command per extra account
 ```
 
 Configuration is one editable plain-language policy file describing your

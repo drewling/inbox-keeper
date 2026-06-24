@@ -1,15 +1,15 @@
 <div align="center">
 
-# inbox-keeper
+# zero
 
 **Keep your inbox at "only what still needs you," across every account, and never lose anything.**
 
 A quiet macOS menu-bar app that reads each Gmail thread, sets aside everything that
 isn't waiting on you, and keeps the rest one tap away. Nothing is ever deleted.
 
-<img src="design/screenshots/panel-loops.png" width="320" alt="inbox-keeper open loops panel">
+<img src="design/screenshots/panel-loops.png" width="320" alt="zero open loops panel">
 
-[![Platform: macOS](https://img.shields.io/badge/platform-macOS%2026%2B-black?logo=apple)](https://github.com/drewling/inbox-keeper/releases)
+[![Platform: macOS](https://img.shields.io/badge/platform-macOS%2026%2B-black?logo=apple)](https://github.com/drewling/zero/releases)
 [![License: PolyForm-NC](https://img.shields.io/badge/license-PolyForm--NC-blue)](LICENSE)
 
 </div>
@@ -18,7 +18,7 @@ isn't waiting on you, and keeps the rest one tap away. Nothing is ever deleted.
 
 ## What it is
 
-Most "inbox zero" tools make you do the sorting. inbox-keeper does the one part
+Most "inbox zero" tools make you do the sorting. zero does the one part
 you'd never finish by hand: continuously deciding what in your inbox is still an
 **open loop** (something genuinely awaiting your action) and quietly setting
 everything else aside.
@@ -75,7 +75,7 @@ Three properties, in priority order:
    fully searchable. Any day's sweep restores in one tap from the **Undo** view.
    Nothing is ever deleted.
 2. **Ambient.** No new app to live in. Your Gmail and Apple Mail stay exactly as
-   they are. inbox-keeper works quietly behind them, once a morning.
+   they are. zero works quietly behind them, once a morning.
 3. **The judgment is an agent, not a rule list.** What counts as "needs you" is
    written in plain English (see [keep-policy.md](keep-policy.md)) and enforced by
    Claude Haiku reading each thread in full. Cold outreach with a real person's
@@ -107,17 +107,17 @@ When unsure, the policy keeps the thread. Everything archived is one tap away.
 
 ### Option 1: Download the app (recommended)
 
-1. Go to the [Releases page](https://github.com/drewling/inbox-keeper/releases)
-   and download the latest `inbox-keeper.dmg`.
-2. Open the .dmg and drag **inbox-keeper** to your Applications folder.
-3. **First launch:** because inbox-keeper is source-available and not notarized
+1. Go to the [Releases page](https://github.com/drewling/zero/releases)
+   and download the latest `zero.dmg`.
+2. Open the .dmg and drag **zero** to your Applications folder.
+3. **First launch:** because zero is source-available and not notarized
    with a paid Apple Developer ID, macOS will block the first open. Right-click
    the app icon and choose **Open**, then confirm in the dialog. You only need to
    do this once.
 
    Alternatively, remove the quarantine flag from Terminal:
    ```bash
-   xattr -dr com.apple.quarantine /Applications/inbox-keeper.app
+   xattr -dr com.apple.quarantine /Applications/zero.app
    ```
    This is a standard macOS gate for apps from outside the App Store. The source
    is here for you to read and verify.
@@ -127,9 +127,9 @@ When unsure, the policy keeps the thread. Everything archived is one tap away.
 Requires: Xcode command-line tools (`xcode-select --install`), macOS 26 (Tahoe, Apple Silicon). The panel uses the native macOS 26 Liquid Glass API.
 
 ```bash
-git clone https://github.com/drewling/inbox-keeper.git
-cd inbox-keeper/macapp
-./build.sh           # produces inbox-keeper.app in macapp/build/
+git clone https://github.com/drewling/zero.git
+cd zero/macapp
+./build.sh           # produces zero.app in macapp/build/
 ./make-dmg.sh        # optional: packages it as a .dmg
 ```
 
@@ -137,20 +137,20 @@ cd inbox-keeper/macapp
 
 ## First run
 
-When you launch inbox-keeper for the first time, the app walks you through:
+When you launch zero for the first time, the app walks you through:
 
 1. **Connect a Gmail account.** An OAuth flow opens in your browser. The app never
    sees your password; it uses the `gws` CLI (which you have already authorized) to
    read and label threads.
 2. **Review your keep policy.** Your plain-English policy is shown in the **Policy**
    tab. Edit it there or directly in [keep-policy.md](keep-policy.md).
-3. **Run the keeper.** Hit **Run keeper now** to tidy your inbox for the first time.
+3. **Run the keeper.** Hit **Run zero now** to tidy your inbox for the first time.
 
 ---
 
 ## Prerequisites
 
-inbox-keeper coordinates three CLI tools that must already be installed and
+zero coordinates three CLI tools that must already be installed and
 authenticated before the app can do anything:
 
 | Requirement | Install | Notes |
@@ -196,14 +196,14 @@ There is nothing else to configure.
 - **Your data stays on your machine.** `accounts.json` and `knowledge/*.md` are
   gitignored and never committed.
 - **Gmail access uses your own credentials.** The `gws` CLI authenticates with
-  your Google account via OAuth; inbox-keeper never handles your password or OAuth
+  your Google account via OAuth; zero never handles your password or OAuth
   tokens directly.
 
 ---
 
 ## Beyond the keeper
 
-This repo also contains the fuller morning pipeline that inbox-keeper grew out of:
+This repo also contains the fuller morning pipeline that zero grew out of:
 AI-drafted replies reviewed from Slack, a missed-items catch-up sweep, and a
 combined daily digest. Those are optional and documented in
 [docs/PIPELINE.md](docs/PIPELINE.md). The keeper and its panel are the core product;

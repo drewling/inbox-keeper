@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bin/inbox-keeper — main CLI for inbox-keeper / mail-triage
+# bin/zero — main CLI for zero / mail-triage
 set -euo pipefail
 
 # Resolve repo root from this script's location, then source config.
@@ -12,9 +12,9 @@ SUBCOMMAND="${1:-}"
 case "$SUBCOMMAND" in
 
   app)
-    APP_BUNDLE="$MAIL_TRIAGE_DIR/macapp/build/inbox-keeper.app"
+    APP_BUNDLE="$MAIL_TRIAGE_DIR/macapp/build/zero.app"
     if [ ! -d "$APP_BUNDLE" ]; then
-      echo "Building inbox-keeper.app (first run)..."
+      echo "Building zero.app (first run)..."
       bash "$MAIL_TRIAGE_DIR/macapp/build.sh"
     fi
     echo "Opening $APP_BUNDLE"
@@ -67,7 +67,7 @@ for a in accts:
   schedule)
     # Install a LaunchAgent that runs the keeper every morning. Hour is arg 2 (default 7).
     HOUR="${2:-7}"
-    LABEL="com.drewl.inbox-keeper.daily"
+    LABEL="com.drewl.zero.daily"
     PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
     mkdir -p "$HOME/Library/LaunchAgents" "$MAIL_TRIAGE_LOGS"
     cat > "$PLIST" <<PL
@@ -78,7 +78,7 @@ for a in accts:
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$SCRIPT_DIR/inbox-keeper</string>
+    <string>$SCRIPT_DIR/zero</string>
     <string>run</string>
   </array>
   <key>StartCalendarInterval</key>
@@ -99,7 +99,7 @@ PL
     ;;
 
   unschedule)
-    LABEL="com.drewl.inbox-keeper.daily"
+    LABEL="com.drewl.zero.daily"
     PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
     launchctl unload "$PLIST" 2>/dev/null || true
     rm -f "$PLIST"
@@ -108,15 +108,15 @@ PL
 
   *)
     cat <<'USAGE'
-inbox-keeper — keep every inbox at "only what needs you"
+zero — keep every inbox at "only what needs you"
 
 Usage:
-  inbox-keeper app           Build (if needed) and open the native menu-bar app
-  inbox-keeper run           Run the keeper across all accounts, then refresh state
-  inbox-keeper state         Refresh the app's cached state without opening anything
-  inbox-keeper schedule [H]  Run the keeper automatically every morning (hour H, default 7)
-  inbox-keeper unschedule    Remove the daily schedule
-  inbox-keeper stop          Stop the local API server
+  zero app           Build (if needed) and open the native menu-bar app
+  zero run           Run the keeper across all accounts, then refresh state
+  zero state         Refresh the app's cached state without opening anything
+  zero schedule [H]  Run the keeper automatically every morning (hour H, default 7)
+  zero unschedule    Remove the daily schedule
+  zero stop          Stop the local API server
 
 USAGE
     ;;

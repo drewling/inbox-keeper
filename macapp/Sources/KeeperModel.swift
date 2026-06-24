@@ -178,7 +178,7 @@ final class KeeperModel: ObservableObject {
             state = s
             if !s.needsBuild { policyDraft = s.policy }
         } else if state == nil {
-            toast("Can’t reach the keeper server")
+            toast("Can’t reach the zero server")
         }
     }
 
@@ -228,7 +228,7 @@ final class KeeperModel: ObservableObject {
     }
 
     private func beginJob(kind: String, starting: String, _ start: @escaping () async throws -> Int) {
-        guard !isBusy else { toast("A keeper run is already going"); return }
+        guard !isBusy else { toast("zero is already running"); return }
         // Optimistic running state so the UI reacts instantly and can't flash "done".
         job = Job(id: -1, kind: kind, state: "running", message: starting)
         Task {
@@ -238,7 +238,7 @@ final class KeeperModel: ObservableObject {
                 if job?.id == -1 { job?.id = id }
                 ensurePolling()
             } catch let KeeperAPI.KeeperError.http(code, _) where code == 409 {
-                job = nil; toast("A keeper run is already going")
+                job = nil; toast("zero is already running")
             } catch {
                 job = nil; toast("Couldn’t start — check the server")
             }

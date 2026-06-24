@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Build inbox-keeper.app — a native SwiftUI menu-bar app.
+# Build zero.app — a native SwiftUI menu-bar app.
 # No Xcode project needed: compiles main.swift with swiftc and assembles a
 # minimal .app bundle, then copies a runtime payload into Resources/.
-# Output: macapp/build/inbox-keeper.app
+# Output: macapp/build/zero.app
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
-APP="$HERE/build/inbox-keeper.app"
+APP="$HERE/build/zero.app"
 MACOS="$APP/Contents/MacOS"
 RES="$APP/Contents/Resources"
 PAYLOAD="$RES/payload"
 
-echo "Building inbox-keeper.app ..."
+echo "Building zero.app ..."
 rm -rf "$APP"
 mkdir -p "$MACOS" "$RES"
 
@@ -21,7 +21,7 @@ mkdir -p "$MACOS" "$RES"
 swiftc -O \
   -target arm64-apple-macosx26.0 \
   -framework AppKit -framework SwiftUI \
-  -o "$MACOS/inbox-keeper" \
+  -o "$MACOS/zero" \
   "$HERE"/Sources/*.swift
 
 cp "$HERE/Info.plist" "$APP/Contents/Info.plist"
@@ -36,7 +36,7 @@ iconutil -c icns "$ICONSET" -o "$RES/AppIcon.icns"
 
 # ---------------------------------------------------------------------------
 # Payload assembly — runtime code bundled for first-launch copy to
-# ~/Library/Application Support/inbox-keeper/
+# ~/Library/Application Support/zero/
 # Only explicit allowlisted paths are copied so personal data can't leak.
 # ---------------------------------------------------------------------------
 echo "Assembling payload ..."

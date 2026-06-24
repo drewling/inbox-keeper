@@ -116,7 +116,7 @@ def _photo_url(cfg):
     except Exception as exc:
         if not _photo_failure_logged:
             _photo_failure_logged = True
-            print(f"[inbox-keeper] profile photo unavailable (People API scope?): {exc}",
+            print(f"[zero] profile photo unavailable (People API scope?): {exc}",
                   file=sys.stderr)
         return None
 

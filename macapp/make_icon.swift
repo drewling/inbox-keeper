@@ -1,4 +1,4 @@
-// make_icon.swift — draws the inbox-keeper app icon natively (no external image
+// make_icon.swift — draws the zero app icon natively (no external image
 // generation) and emits a full .iconset. build.sh runs `iconutil` on the output.
 //
 // The mark echoes the in-app wordmark: a glossy Google-blue squircle holding a cream

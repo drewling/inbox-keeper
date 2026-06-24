@@ -204,7 +204,7 @@ struct Job: Decodable {
     }
 }
 
-// One Gmail label in the per-account cleanup sheet. `ours` marks labels inbox-keeper
+// One Gmail label in the per-account cleanup sheet. `ours` marks labels zero
 // created (recovery points, category tags, legacy taxonomy) so they can be pre-checked.
 struct LabelInfo: Decodable, Identifiable {
     var id = ""

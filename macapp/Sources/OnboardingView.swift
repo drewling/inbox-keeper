@@ -26,7 +26,7 @@ struct OnboardingView: View {
                 .phaseAnimator(reduceMotion ? [1.0] : [1.0, 1.035]) { v, s in v.scaleEffect(s) }
                     animation: { _ in .easeInOut(duration: 2.4) }
 
-            Text("inbox·keeper")
+            Text("zero")
                 .font(.system(size: 21, weight: .semibold)).kerning(-0.2)
                 .padding(.top, 16)
             Text("Keeps your inbox at only what still needs you, across every account. Nothing is ever deleted.")
@@ -108,7 +108,7 @@ struct BacklogStep: View {
 
             Text("Start from a calm inbox")
                 .font(.system(size: 19, weight: .semibold)).kerning(-0.2).padding(.top, 16)
-            Text("Optionally archive everything older than a date you choose, so the keeper only weighs what’s recent. Nothing is deleted — it’s one tap to undo.")
+            Text("Optionally archive everything older than a date you choose, so zero only weighs what’s recent. Nothing is deleted — it’s one tap to undo.")
                 .font(.system(size: 13)).foregroundStyle(Paper.ink3)
                 .multilineTextAlignment(.center).frame(maxWidth: 320).padding(.top, 6)
 

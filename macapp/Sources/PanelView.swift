@@ -70,8 +70,8 @@ private struct TopBar: View {
     @EnvironmentObject var m: KeeperModel
     var body: some View {
         HStack(spacing: 8) {
-            // Wordmark: a glossy terracotta squircle with a cream check (echoes the
-            // app icon) + "inbox·keeper".
+            // Wordmark: a glossy blue squircle with a cream check (echoes the
+            // app icon) + the "zero" lowercase mark.
             RoundedRectangle(cornerRadius: 5, style: .continuous)
                 .fill(LinearGradient(colors: [Paper.accentHi, Paper.accent], startPoint: .top, endPoint: .bottom))
                 .frame(width: 16, height: 16)
@@ -80,13 +80,9 @@ private struct TopBar: View {
                 .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .strokeBorder(.white.opacity(0.28), lineWidth: 0.5))
                 .shadow(color: Paper.accent.opacity(0.4), radius: 3, y: 1)
-            HStack(spacing: 0) {
-                Text("inbox").fontWeight(.semibold)
-                Text("·").foregroundStyle(Paper.ink4)
-                Text("keeper").fontWeight(.semibold)
-            }
-            .font(.system(size: 13.5))
-            .kerning(-0.1)
+            Text("zero").fontWeight(.semibold)
+                .font(.system(size: 13.5))
+                .kerning(-0.1)
 
             Spacer(minLength: 8)
 
@@ -320,7 +316,7 @@ private struct AccountsView: View {
             VStack(spacing: 14) {
                 EmptyState(symbol: "archivebox", warn: false,
                            title: "Connect your first inbox",
-                           message: "Add a Gmail account and the keeper starts watching for what needs you.")
+                           message: "Add a Gmail account and zero starts watching for what needs you.")
                 Button { m.addAccount() } label: { Label("Add a Gmail account", systemImage: "plus") }
                     .buttonStyle(PrimaryButtonStyle())
             }
@@ -493,7 +489,7 @@ private struct TimingSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             SettingsHeader("Timing",
-                           "The windows the keeper works in. Newer mail is left untouched; older mail can be cleared in one reversible sweep.")
+                           "The windows zero works in. Newer mail is left untouched; older mail can be cleared in one reversible sweep.")
             HStack(spacing: 10) {
                 Text("Protect mail newer than").font(.system(size: 12.5)).foregroundStyle(Paper.ink2)
                 Picker("", selection: Binding(get: { m.graceDays }, set: { m.saveGraceDays($0) })) {
@@ -530,7 +526,7 @@ private struct CategoriesSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             SettingsHeader("Categories",
-                           "Buckets the keeper sorts your open loops into. Each becomes a Gmail label and a tag on the list. They pass to the agent on the next run.")
+                           "Buckets zero sorts your open loops into. Each becomes a Gmail label and a tag on the list. They pass to the agent on the next run.")
             VStack(spacing: 8) {
                 ForEach($m.categoriesDraft) { $cat in
                     CategoryEditRow(cat: $cat) { m.removeCategory(cat.id) }
@@ -567,7 +563,7 @@ private struct CategoryEditRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 TextField("Name", text: $cat.name)
                     .textFieldStyle(.plain).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Paper.ink)
-                TextField("When should the keeper use this?", text: $cat.description)
+                TextField("When should zero use this?", text: $cat.description)
                     .textFieldStyle(.plain).font(.system(size: 11.5)).foregroundStyle(Paper.ink3)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -701,7 +697,7 @@ private struct LearnedSection: View {
             if learned.isEmpty {
                 HStack(spacing: 9) {
                     Image(systemName: "sparkles").font(.system(size: 12)).foregroundStyle(Paper.accentSoft)
-                    Text("Nothing yet. As you edit drafts and restore threads, the keeper learns your voice and what matters to you here.")
+                    Text("Nothing yet. As you edit drafts and restore threads, zero learns your voice and what matters to you here.")
                         .font(.system(size: 12)).foregroundStyle(Paper.ink3)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -1062,7 +1058,7 @@ private struct ActionBar: View {
                 HStack(spacing: 6) {
                     if m.isBusy { ProgressView().controlSize(.small).tint(.white) }
                     else { Image(systemName: "arrow.clockwise").font(.system(size: 12, weight: .semibold)) }
-                    Text(m.isBusy ? "Keeping…" : "Run keeper now")
+                    Text(m.isBusy ? "Keeping…" : "Run zero now")
                 }
             }
             .buttonStyle(PrimaryButtonStyle(enabled: !m.isBusy)).disabled(m.isBusy)
