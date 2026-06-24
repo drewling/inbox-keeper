@@ -187,7 +187,10 @@ def _count_inbox(config_dir):
 # but you never want to bury a contract to sign or a failed payment).
 PROTECT_PATTERNS = (
     'in:inbox ('
-    'from:docusign.net OR from:hellosign.com OR from:dropboxsign.com OR '
+    # E-signature requests, but ONLY live ones — completed/voided/declined envelopes
+    # and bare comment notifications are settled and should not be shielded forever.
+    '((from:docusign.net OR from:hellosign.com OR from:dropboxsign.com) '
+    '-subject:completed -subject:voided -subject:declined -subject:"new comment") OR '
     'subject:"please sign" OR subject:"signature requested" OR subject:"e-signature" OR '
     'subject:"payment failed" OR subject:"payment declined" OR subject:"payment unsuccessful" OR '
     'subject:"past due" OR subject:"direct debit" OR subject:"card declined" OR '

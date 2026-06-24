@@ -50,6 +50,38 @@ GWS_CONFIG_DIR="$(dirname "$PRIMARY_CONFIG")"
     || { echo "claude triage failed"; rc=1; }
   echo "=== triage done $(date +%H:%M:%S) ==="
 
+  # --- Demote automated/no-reply mail out of ⚡ Action (deterministic guard) ---
+  # The LLM triage occasionally promotes Google security alerts, billing notices,
+  # etc. to ⚡ Action. This pass moves them to 🔔 Services so the action count stays real.
+  echo "--- demoting automated mail out of Action (all accounts) ---"
+  /opt/homebrew/bin/python3 -c "
+import json
+a = json.load(open('$MAIL_TRIAGE_ACCOUNTS'))
+accts = a if isinstance(a, list) else a.get('accounts', [])
+for acct in accts:
+    print(acct['config_dir'] + '\t' + acct.get('email', acct['config_dir']))
+" | while IFS=$'\t' read -r cfg email; do
+    "$MAIL_TRIAGE_PYTHON" "$MAIL_TRIAGE_LIB/demote_automated.py" "$cfg" "$email" --execute \
+      || { echo "demote_automated failed for $email"; rc=1; }
+  done
+  echo "=== demote done $(date +%H:%M:%S) ==="
+
+  # --- Open-loop maintenance: archive threads already dealt with (reversible) ---
+  # Keeps the inbox at "only what still needs Tayo". Grace of 2 days means fresh
+  # mail is never touched before he has seen it; older settled threads get archived.
+  echo "--- open-loop sweep (all accounts, grace 2d) ---"
+  /opt/homebrew/bin/python3 -c "
+import json
+a = json.load(open('$MAIL_TRIAGE_ACCOUNTS'))
+accts = a if isinstance(a, list) else a.get('accounts', [])
+for acct in accts:
+    print(acct['config_dir'] + '\t' + acct.get('email', acct['config_dir']))
+" | while IFS=$'\t' read -r cfg email; do
+    "$MAIL_TRIAGE_PYTHON" "$MAIL_TRIAGE_LIB/review_open_loops.py" "$cfg" "$email" --grace-days 2 --execute \
+      || { echo "open-loop sweep failed for $email"; rc=1; }
+  done
+  echo "=== open-loop done $(date +%H:%M:%S) ==="
+
   # --- Missed-items catch-up sweep (all accounts, in parallel) ---
   echo "--- missed-items catch-up sweep (14d, all accounts) ---"
   "$MAIL_TRIAGE_PYTHON" "$MAIL_TRIAGE_LIB/missed_sweep.py" 14 \
