@@ -78,6 +78,8 @@ def _build_state_blocking():
 
 
 def _load_accounts():
+    if not os.path.isfile(ACCOUNTS_PATH):
+        return []
     with open(ACCOUNTS_PATH) as f:
         data = json.load(f)
     return data if isinstance(data, list) else data.get("accounts", [])
@@ -168,7 +170,11 @@ def _dismiss(payload):
 
     # Undo a just-dismissed thread: put it back in the inbox and net out the signal.
     if payload.get("undo"):
-        label = payload.get("label") or iz._dated_label(iz._BASE_LABEL)
+        # Use the exact label from the dismiss response; never recompute "today"
+        # (an undo just after midnight would otherwise target the wrong label).
+        label = payload.get("label")
+        if not label:
+            raise ValueError("undo requires the recovery label from the dismiss")
         labels = du._gws(cfg, ["gmail", "users", "labels", "list",
                                "--params", json.dumps({"userId": "me"})]).get("labels", [])
         lab = next((l for l in labels if l.get("name") == label), None)
@@ -244,16 +250,25 @@ def _gen_draft(payload):
     msgs = t.get("messages", []) or []
     if not msgs:
         raise ValueError("thread has no messages")
+    try:
+        owner = (du._profile_email(cfg) or "").lower()
+    except Exception:
+        owner = ""
     convo = []
     subject = "(no subject)"
     last_from = ""
+    recipient_from = ""   # newest message NOT from the account owner
     for m in msgs:
         h = {x["name"].lower(): x["value"] for x in m.get("payload", {}).get("headers", [])}
-        last_from = h.get("from", last_from)
+        frm = h.get("from", "")
+        last_from = frm or last_from
         subject = h.get("subject", subject)
-        convo.append(f"From {h.get('from','?')}: {m.get('snippet','')}")
-    to_name = parseaddr(last_from)[0] or parseaddr(last_from)[1] or last_from
-    to_email = parseaddr(last_from)[1] or ""
+        convo.append(f"From {frm or '?'}: {m.get('snippet','')}")
+        if frm and parseaddr(frm)[1].lower() != owner:
+            recipient_from = frm  # ends as the newest external sender
+    chosen = recipient_from or last_from  # whole thread from owner -> reply to last
+    to_name = parseaddr(chosen)[0] or parseaddr(chosen)[1] or chosen
+    to_email = parseaddr(chosen)[1] or ""
     voice = learning.learned_text()
     voice_block = f"\nVOICE NOTES learned from the user's past edits:\n{voice}\n" if voice.strip() else ""
     prompt = (
@@ -272,8 +287,13 @@ def _gen_draft(payload):
         raise RuntimeError("drafting timed out")
     if r.returncode != 0:
         raise RuntimeError("drafting failed")
+    body = r.stdout.strip()
+    if not body:
+        raise RuntimeError("the draft came back empty; try Regenerate")
+    if not to_email:
+        raise RuntimeError("couldn't determine who to reply to")
     return {"ok": True, "to_name": to_name, "to_email": to_email,
-            "subject": subject, "body": r.stdout.strip()}
+            "subject": subject, "body": body}
 
 
 def _send_draft(payload):
@@ -316,45 +336,62 @@ def _add_account(payload):
     it to accounts.json. The OAuth consent happens in the browser; we never see
     credentials."""
     import time as _time
+    import shutil
     home = os.path.expanduser("~")
     pending = os.path.join(home, ".config", "gws", "accounts", f"pending-{int(_time.time())}")
     os.makedirs(pending, exist_ok=True)
-    env = _gws_env()
-    env["GOOGLE_WORKSPACE_CLI_CONFIG_DIR"] = pending
-    _set_job_message("Opening your browser to sign in...")
-    r = subprocess.run(["gws", "auth", "login"], env=env,
-                       capture_output=True, text=True, timeout=300)
-    if r.returncode != 0:
-        raise RuntimeError("sign-in didn't complete: " + (r.stderr or r.stdout or "")[-200:])
-    prof = subprocess.run(["gws", "gmail", "users", "getProfile", "--params",
-                           json.dumps({"userId": "me"})], env=env,
-                          capture_output=True, text=True, timeout=60)
-    email = ""
-    for line in prof.stdout.splitlines():
-        line = line.strip()
-        if line.startswith("{") and "keyring" not in line:
-            try:
-                email = json.loads(line).get("emailAddress", "")
-            except Exception:
-                pass
-    if not email:
-        raise RuntimeError("signed in but couldn't read the account email")
-    slug = email.split("@")[0].replace(".", "-").lower()
-    final_dir = os.path.join(home, ".config", "gws", "accounts", slug)
-    accts = _load_accounts()
-    if any(a.get("email") == email for a in accts):
-        raise RuntimeError(f"{email} is already added")
-    if os.path.exists(final_dir):
-        final_dir = pending  # keep the pending dir if the nice name is taken
-    else:
-        os.rename(pending, final_dir)
-    accts.append({"slug": slug, "email": email, "config_dir": final_dir})
-    tmp = ACCOUNTS_PATH + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(accts, f, indent=2)
-    os.replace(tmp, ACCOUNTS_PATH)
-    _set_job_message("Adding account...")
-    _build_state_blocking()
+    committed = False
+    created_dir = None
+    try:
+        env = _gws_env()
+        env["GOOGLE_WORKSPACE_CLI_CONFIG_DIR"] = pending
+        _set_job_message("Opening your browser to sign in...")
+        r = subprocess.run(["gws", "auth", "login"], env=env,
+                           capture_output=True, text=True, timeout=300)
+        if r.returncode != 0:
+            raise RuntimeError("sign-in didn't complete: " + (r.stderr or r.stdout or "")[-200:])
+        prof = subprocess.run(["gws", "gmail", "users", "getProfile", "--params",
+                               json.dumps({"userId": "me"})], env=env,
+                              capture_output=True, text=True, timeout=60)
+        email = ""
+        for line in prof.stdout.splitlines():
+            line = line.strip()
+            if line.startswith("{") and "keyring" not in line:
+                try:
+                    email = json.loads(line).get("emailAddress", "")
+                except Exception:
+                    pass
+        if not email:
+            raise RuntimeError("signed in but couldn't read the account email")
+        accts = _load_accounts()
+        if any(a.get("email") == email for a in accts):
+            raise RuntimeError(f"{email} is already added")
+        # Derive a slug that is unique across existing accounts (two emails can
+        # share a local-part), and use the SAME slug for the dir and the entry.
+        base = email.split("@")[0].replace(".", "-").lower() or "account"
+        existing = {a.get("slug") for a in accts}
+        slug, n = base, 2
+        while slug in existing:
+            slug, n = f"{base}-{n}", n + 1
+        final_dir = os.path.join(home, ".config", "gws", "accounts", slug)
+        if os.path.exists(final_dir):
+            use_dir = pending  # nice name taken; keep the pending dir as config
+        else:
+            os.rename(pending, final_dir)
+            created_dir, use_dir = final_dir, final_dir
+        accts.append({"slug": slug, "email": email, "config_dir": use_dir})
+        tmp = ACCOUNTS_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(accts, f, indent=2)
+        os.replace(tmp, ACCOUNTS_PATH)
+        committed = True
+        _set_job_message("Adding account...")
+        _build_state_blocking()
+    finally:
+        if not committed:
+            shutil.rmtree(pending, ignore_errors=True)
+            if created_dir:
+                shutil.rmtree(created_dir, ignore_errors=True)
 
 
 _JOB_KINDS = {"refresh": lambda p: _build_state_blocking(),
