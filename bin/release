@@ -83,6 +83,23 @@ RELEASE_URL="$(gh release create "$TAG" "$DMG" \
   --notes-file "$NOTES_FILE" \
   --repo drewling/inbox-keeper)"
 
+# ── 8. Install locally over /Applications ────────────────────────────────────
+# bin/release only publishes the DMG; the user's running app stays stale until
+# swapped. Do it here so every release lands in the app they actually use.
+APP_SRC="$REPO_ROOT/macapp/build/inbox-keeper.app"
+APP_DST="/Applications/inbox-keeper.app"
+if [[ -d "$APP_SRC" ]]; then
+  echo "==> Installing ${TAG} to ${APP_DST}..."
+  osascript -e 'tell application "inbox-keeper" to quit' >/dev/null 2>&1 || true
+  pkill -x inbox-keeper >/dev/null 2>&1 || true
+  rm -rf "$APP_DST"
+  cp -R "$APP_SRC" "$APP_DST"
+  open "$APP_DST"
+  echo "    Installed and relaunched."
+else
+  echo "WARNING: built app not found at $APP_SRC — skipped local install." >&2
+fi
+
 echo ""
 echo "==> Done! Release published at:"
 echo "    ${RELEASE_URL}"
