@@ -73,6 +73,9 @@ def _run_keeper(payload):
                            env=_gws_env(), capture_output=True, text=True, timeout=600)
         if r.returncode != 0:
             failures.append(f"{email}: {(r.stderr or r.stdout or '').strip()[-200:]}")
+    # Update what we've learned from recent actions (best-effort; gated on signals).
+    subprocess.run([PYTHON, os.path.join(HERE, "learn.py")],
+                   env=_gws_env(), capture_output=True, text=True, timeout=180)
     _set_job_message("Refreshing...")
     _build_state_blocking()
     if failures:
@@ -119,6 +122,53 @@ def _run_undo(payload):
                 allow_empty=True)
     _set_job_message(f"Restored {len(msg_ids)} messages. Refreshing...")
     _build_state_blocking()
+
+
+def _dismiss(payload):
+    """Set one loop aside: archive its whole thread reversibly and record that the
+    user chose to archive rather than reply (a learning signal). Fast + synchronous
+    so the panel can remove the row immediately."""
+    sys.path.insert(0, HERE)
+    import draftutil as du       # noqa: E402
+    import inbox_zero as iz      # noqa: E402
+    import learning              # noqa: E402
+    slug = payload.get("slug")
+    tid = payload.get("thread_id")
+    if not slug or not tid:
+        raise ValueError("dismiss requires slug and thread_id")
+    acct = next((a for a in _load_accounts()
+                 if (a.get("slug") or a.get("email")) == slug), None)
+    if not acct:
+        raise ValueError(f"unknown account {slug!r}")
+    cfg = acct["config_dir"]
+
+    # Undo a just-dismissed thread: put it back in the inbox and net out the signal.
+    if payload.get("undo"):
+        label = payload.get("label") or iz._dated_label(iz._BASE_LABEL)
+        labels = du._gws(cfg, ["gmail", "users", "labels", "list",
+                               "--params", json.dumps({"userId": "me"})]).get("labels", [])
+        lab = next((l for l in labels if l.get("name") == label), None)
+        remove = [lab["id"]] if lab else []
+        du._gws(cfg, ["gmail", "users", "threads", "modify",
+                      "--params", json.dumps({"userId": "me", "id": tid}),
+                      "--json", json.dumps({"addLabelIds": ["INBOX"], "removeLabelIds": remove})],
+                allow_empty=True)
+        learning.record({"type": "keep_override_undo", "account": slug, "thread_id": tid})
+        return {"ok": True, "restored": tid}
+
+    label = iz._dated_label(iz._BASE_LABEL)
+    lid = iz._ensure_label(cfg, label)
+    du._gws(cfg, ["gmail", "users", "threads", "modify",
+                  "--params", json.dumps({"userId": "me", "id": tid}),
+                  "--json", json.dumps({"addLabelIds": [lid], "removeLabelIds": ["INBOX"]})],
+            allow_empty=True)
+    learning.record({"type": "keep_override", "action": "archived_without_reply",
+                     "account": slug, "thread_id": tid,
+                     "sender": payload.get("sender", ""),
+                     "sender_email": payload.get("sender_email", ""),
+                     "subject": payload.get("subject", ""),
+                     "snippet": payload.get("snippet", "")})
+    return {"ok": True, "label": label, "thread_id": tid}
 
 
 _JOB_KINDS = {"refresh": lambda p: _build_state_blocking(),
@@ -229,6 +279,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, {"error": "cross-site request blocked"})
         p = urlparse(self.path).path
         payload = self._body_json()
+        # Dismiss is fast (one thread) and runs synchronously, not via the job slot.
+        if p == "/api/dismiss":
+            try:
+                return self._send(200, _dismiss(payload))
+            except Exception as exc:
+                return self._send(500, {"error": str(exc)})
         kind = {"/api/refresh": "refresh", "/api/run": "run",
                 "/api/undo": "undo"}.get(p)
         if not kind:

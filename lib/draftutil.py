@@ -125,13 +125,30 @@ def cmd_update(a):
 
 
 def cmd_update_send(a):
-    raw = _build_raw(a.config_dir, a.thread_id, a.to, _b64d(a.subject_b64), _b64d(a.body_b64))
+    # Reaching update-send means the user edited the system's draft before sending,
+    # so capture it as a voice signal (original vs final) for the learning rollup.
+    orig = ""
+    try:
+        g = _gws(a.config_dir, ["gmail", "users", "drafts", "get",
+                                "--params", json.dumps({"userId": "me", "id": a.draft_id,
+                                                        "format": "metadata"})])
+        orig = ((g.get("message") or {}).get("snippet") or "")
+    except Exception:
+        pass
+    final = _b64d(a.body_b64)
+    raw = _build_raw(a.config_dir, a.thread_id, a.to, _b64d(a.subject_b64), final)
     _gws(a.config_dir, ["gmail", "users", "drafts", "update",
                         "--params", json.dumps({"userId": "me", "id": a.draft_id}),
                         "--json", json.dumps({"message": {"raw": raw, "threadId": a.thread_id}})])
     d = _gws(a.config_dir, ["gmail", "users", "drafts", "send",
                             "--params", json.dumps({"userId": "me"}),
                             "--json", json.dumps({"id": a.draft_id})])
+    try:
+        import learning
+        learning.record({"type": "draft_edit", "thread_id": a.thread_id,
+                         "original_snippet": orig, "final": final})
+    except Exception:
+        pass
     print(json.dumps({"ok": True, "id": d.get("id")}))
 
 

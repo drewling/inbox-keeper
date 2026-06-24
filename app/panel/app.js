@@ -2,6 +2,11 @@
    artifact, renders four views, and drives keeper/undo jobs via the local API. */
 "use strict";
 
+// Running inside the native app window? Fill edge-to-edge (the window rounds it).
+if (new URLSearchParams(location.search).get("app")) {
+  document.documentElement.classList.add("in-app");
+}
+
 const $ = (sel, root = document) => root.querySelector(sel);
 const viewEl = $("#view");
 const navEl = $("#nav");
@@ -52,13 +57,28 @@ async function api(path, opts) {
 }
 
 let toastTimer = null;
-function toast(msg) {
+function _toastEl() {
   let t = $(".toast", panelEl);
   if (!t) { t = document.createElement("div"); t.className = "toast"; panelEl.appendChild(t); }
-  t.textContent = msg;
+  return t;
+}
+function toast(msg) {
+  const t = _toastEl();
+  t.innerHTML = `<span>${esc(msg)}</span>`;
   requestAnimationFrame(() => t.classList.add("show"));
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
+}
+function toastUndo(msg, onUndo) {
+  const t = _toastEl();
+  t.innerHTML = `<span>${esc(msg)}</span><button class="toast-undo">Undo</button>`;
+  t.querySelector(".toast-undo").onclick = () => {
+    t.classList.remove("show");
+    onUndo();
+  };
+  requestAnimationFrame(() => t.classList.add("show"));
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 4500);
 }
 
 /* ---------- data ---------- */
@@ -146,16 +166,18 @@ function renderLoops() {
 
   const list = rows.map((r) => {
     const a = r._acct;
-    return `<button class="row" data-thread="${esc(r.thread_id)}" data-slug="${esc(a.slug)}">
+    return `<li class="row" role="button" tabindex="0" data-thread="${esc(r.thread_id)}"
+        data-slug="${esc(a.slug)}" data-sender="${esc(r.sender)}"
+        data-email="${esc(r.sender_email || "")}" data-subject="${esc(r.subject)}"
+        data-snippet="${esc(r.snippet || "")}">
       <span class="mono" style="background:${esc(a.color)}">${esc(a.short)}</span>
       <span class="body">
         <span class="sender">${esc(r.sender)}</span>
         <span class="ask">${esc(r.subject)}</span>
       </span>
-      <span class="meta">
-        <span class="when">${esc(relTime(r.epoch))}</span>
-      </span>
-    </button>`;
+      <span class="meta"><span class="when">${esc(relTime(r.epoch))}</span></span>
+      <button class="row-dismiss" data-dismiss aria-label="Set aside: ${esc(r.subject)}" title="Set aside (reversible)">${archiveSvg()}</button>
+    </li>`;
   }).join("");
 
   return failureBanner() + hero +
@@ -212,12 +234,40 @@ function renderUndo() {
 
 function renderPolicy() {
   const text = STATE?.policy || "";
+  const learned = (STATE?.learned || "").trim();
+  const learnedBody = learned.replace(/^#[^\n]*\n+/, "");  // panel adds its own heading
+  const learnedBlock = learned
+    ? `<div class="learned">
+         <div class="section-label">Learned from your actions</div>
+         <div class="learned-body">${mdLite(learnedBody)}</div>
+       </div>`
+    : `<p class="policy-note dim">As you set loops aside and edit drafts, the keeper
+        learns your preferences and shows them here.</p>`;
   return `<div class="policy-wrap">
     <p class="policy-note">The <b>only</b> thing you configure. Describe what counts as
       “still needs me” in plain English. The agent reads each thread and enforces it.</p>
     <textarea class="policy-edit" id="policy-edit" spellcheck="false"
               aria-label="Keep policy">${esc(text)}</textarea>
+    ${learnedBlock}
   </div>`;
+}
+
+// Minimal, safe markdown: headings, bullets, bold. Escapes first, then formats.
+function mdLite(src) {
+  const lines = esc(src).split("\n");
+  let html = "", inList = false;
+  const closeList = () => { if (inList) { html += "</ul>"; inList = false; } };
+  for (let raw of lines) {
+    const line = raw.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+    if (/^#+\s/.test(line)) { closeList(); html += `<h4>${line.replace(/^#+\s/, "")}</h4>`; }
+    else if (/^[-*]\s/.test(line)) {
+      if (!inList) { html += "<ul>"; inList = true; }
+      html += `<li>${line.replace(/^[-*]\s/, "")}</li>`;
+    } else if (line.startsWith("&gt;")) { /* skip blockquote chrome */ }
+    else if (line.trim()) { closeList(); html += `<p>${line}</p>`; }
+  }
+  closeList();
+  return html;
 }
 
 function skeleton() {
@@ -234,6 +284,9 @@ function checkSvg() {
 }
 function alertSvg() {
   return `<svg viewBox="0 0 24 24" fill="none" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>`;
+}
+function archiveSvg() {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><path d="M10 12h4"/></svg>`;
 }
 function runSvg() {
   return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>`;
@@ -274,14 +327,49 @@ function render() {
 
 function wireView() {
   viewEl.querySelectorAll(".row").forEach((row) => {
-    row.onclick = () => {
+    const open = () => {
       const a = acctBySlug(row.dataset.slug);
       window.open(gmailUrl(a, row.dataset.thread), "_blank");
     };
+    row.onclick = (e) => { if (!e.target.closest("[data-dismiss]")) open(); };
+    row.onkeydown = (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+    };
+  });
+  viewEl.querySelectorAll("[data-dismiss]").forEach((btn) => {
+    btn.onclick = (e) => { e.stopPropagation(); doDismiss(btn.closest(".row")); };
   });
   viewEl.querySelectorAll("[data-restore]").forEach((btn) => {
     btn.onclick = () => doUndo(btn.dataset.slug, btn.dataset.label, btn);
   });
+}
+
+async function doDismiss(row) {
+  if (!row) return;
+  const d = row.dataset;
+  row.classList.add("removing");
+  // Optimistically drop the row and the count; correct on next refresh.
+  setTimeout(() => row.remove(), 180);
+  if (STATE && typeof STATE.total_loops === "number") {
+    STATE.total_loops = Math.max(0, STATE.total_loops - 1);
+    const c = $(".hero .count");
+    if (c) c.textContent = STATE.total_loops;
+  }
+  const { ok, data } = await api("/api/dismiss", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ slug: d.slug, thread_id: d.thread, sender: d.sender,
+      sender_email: d.email, subject: d.subject, snippet: d.snippet }),
+  });
+  if (!ok) { toast("Couldn’t set aside"); loadState(); return; }
+  toastUndo("Set aside", () => doRestoreThread(d, data && data.label));
+}
+
+async function doRestoreThread(d, label) {
+  await api("/api/dismiss", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ undo: true, slug: d.slug, thread_id: d.thread, label }),
+  });
+  loadState();
 }
 
 /* ---------- jobs ---------- */

@@ -82,6 +82,13 @@ for acct in accts:
   done
   echo "=== open-loop done $(date +%H:%M:%S) ==="
 
+  # --- Learn from the user's recent actions, then refresh the panel's state ---
+  echo "--- learning from recent actions + refreshing panel state ---"
+  "$MAIL_TRIAGE_PYTHON" "$MAIL_TRIAGE_LIB/learn.py" || echo "learn step skipped"
+  "$MAIL_TRIAGE_PYTHON" "$MAIL_TRIAGE_LIB/dashboard_state.py" \
+    || { echo "dashboard_state refresh failed"; rc=1; }
+  echo "=== panel state refreshed $(date +%H:%M:%S) ==="
+
   # --- Missed-items catch-up sweep (all accounts, in parallel) ---
   echo "--- missed-items catch-up sweep (14d, all accounts) ---"
   "$MAIL_TRIAGE_PYTHON" "$MAIL_TRIAGE_LIB/missed_sweep.py" 14 \
