@@ -91,7 +91,7 @@ private struct TopBar: View {
             }
         }
         .padding(.horizontal, 18).padding(.top, 13).padding(.bottom, 11)
-        .background(Paper.raised.opacity(0.05))
+        .glassSurface(0)
         .overlay(alignment: .bottom) { Rectangle().fill(Paper.hairline.opacity(0.1)).frame(height: 0.5) }
     }
 }
@@ -132,36 +132,38 @@ private struct SegmentedNav: View {
     @EnvironmentObject var m: KeeperModel
     let ns: Namespace.ID
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(Tab.allCases) { tab in
-                let on = m.tab == tab
-                Button {
-                    withAnimation(Motion.morph) { m.tab = tab }
-                } label: {
-                    Text(tab.title)
-                        .font(.system(size: 12.5, weight: on ? .semibold : .medium))
-                        .foregroundStyle(on ? Paper.ink : Paper.ink3)
-                        .legibleOnGlass()
-                        .frame(maxWidth: .infinity).frame(height: 28)
-                        .background {
-                            if on {
-                                // A real Liquid-Glass pill that flows between tabs — it
-                                // looks like a single blob of glass migrating, catching
-                                // light, rather than a box snapping position.
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .fill(Paper.raised.opacity(0.10))
-                                    .glassSurface(7)
-                                    .shadow(color: .black.opacity(0.18), radius: 3, y: 1)
-                                    .matchedGeometryEffect(id: "seg", in: ns)
+        GlassEffectContainer(spacing: 2) {
+            HStack(spacing: 2) {
+                ForEach(Tab.allCases) { tab in
+                    let on = m.tab == tab
+                    Button {
+                        withAnimation(Motion.morph) { m.tab = tab }
+                    } label: {
+                        Text(tab.title)
+                            .font(.system(size: 12.5, weight: on ? .semibold : .medium))
+                            .foregroundStyle(on ? Paper.ink : Paper.ink3)
+                            .legibleOnGlass()
+                            .frame(maxWidth: .infinity).frame(height: 28)
+                            .background {
+                                if on {
+                                    // A real Liquid-Glass pill that flows between tabs — it
+                                    // looks like a single blob of glass migrating, catching
+                                    // light, rather than a box snapping position.
+                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .fill(Paper.raised.opacity(0.10))
+                                        .glassSurface(7)
+                                        .shadow(color: .black.opacity(0.18), radius: 3, y: 1)
+                                        .matchedGeometryEffect(id: "seg", in: ns)
+                                }
                             }
-                        }
-                        .contentShape(Rectangle())
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
+            .padding(3)
+            .glassSurface(9)
         }
-        .padding(3)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Paper.sunken.opacity(0.22)))
         .padding(.horizontal, 14).padding(.vertical, 10)
         .focusEffectDisabled()         // no blue focus ring on the first-load selected tab
     }
@@ -220,6 +222,7 @@ private struct LoopsView: View {
                         .padding(.horizontal, 10).padding(.bottom, 14)
                     }
                 }
+                .scrollEdgeEffectStyle(.soft, for: .top)
             }
         }
     }
@@ -280,8 +283,7 @@ private struct LoopRowView: View {
             .opacity(hovering ? 1 : 0.55)
         }
         .padding(.horizontal, 10).padding(.vertical, 9)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
-            .fill(hovering ? Paper.raised.opacity(0.08) : .clear))
+        .glassSurface(9, interactive: true)
         .onHover { hovering = $0 }
         // Leaving rows sweep right and dissolve, like being slid onto the set-aside
         // pile; arrivals (undo) just fade so a restore feels gentle, not jarring.
@@ -299,7 +301,7 @@ private struct RowAction: View {
             Image(systemName: symbol).font(.system(size: 13, weight: .medium))
                 .foregroundStyle(over ? Paper.accentSoft : Paper.ink3)
                 .frame(width: 28, height: 28)
-                .background(RoundedRectangle(cornerRadius: 7).fill(over ? Paper.accentSoft.opacity(0.16) : .clear))
+                .glassSurface(7, interactive: over)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain).help(help).accessibilityLabel(help).onHover { over = $0 }
@@ -804,7 +806,7 @@ private struct ComposerView: View {
                         .buttonStyle(.plain).foregroundStyle(Paper.ink3).accessibilityLabel("Close")
                 }
                 .padding(14)
-                .background(Paper.sunken.opacity(0.24))
+                .glassSurface(8)
                 .overlay(alignment: .bottom) { Rectangle().fill(Paper.hairline.opacity(0.1)).frame(height: 0.5) }
 
                 if m.composerLoading {
@@ -836,7 +838,7 @@ private struct ComposerView: View {
                     .buttonStyle(PrimaryButtonStyle()).disabled(m.composerLoading || m.composerSending)
                 }
                 .padding(12)
-                .background(Paper.sunken.opacity(0.24))
+                .glassSurface(8)
                 .overlay(alignment: .top) { Rectangle().fill(Paper.hairline.opacity(0.1)).frame(height: 0.5) }
             }
             .glassSurface(14, tint: Color(0, 0, 0).opacity(0.5))   // real Liquid Glass, tinted dark enough to keep text legible
@@ -893,7 +895,7 @@ private struct FormatBar: View {
     private func fmt<L: View>(@ViewBuilder _ label: () -> L, _ a11y: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             label().frame(width: 28, height: 26)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Paper.sunken.opacity(0.24)))
+                .glassSurface(6, interactive: true)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain).accessibilityLabel(a11y)
@@ -1064,7 +1066,7 @@ private struct ActionBar: View {
             .buttonStyle(PrimaryButtonStyle(enabled: !m.isBusy)).disabled(m.isBusy)
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
-        .background(Paper.raised.opacity(0.05))
+        .glassSurface(0)
         .overlay(alignment: .top) { Rectangle().fill(Paper.hairline.opacity(0.1)).frame(height: 0.5) }
     }
     private var statusText: String {
@@ -1143,7 +1145,7 @@ private struct Banner: View {
         Text(text).font(.system(size: 11.5)).foregroundStyle(error ? Paper.danger : Paper.ink2)
             .padding(.horizontal, 12).padding(.vertical, 9)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 9).fill((error ? Paper.danger : Paper.ink4).opacity(0.1)))
+            .glassSurface(10, tint: error ? Paper.danger.opacity(0.18) : Color.black.opacity(0.4))
             .padding(.horizontal, 14).padding(.top, 12)
     }
 }

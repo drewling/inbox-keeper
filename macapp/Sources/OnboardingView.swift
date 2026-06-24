@@ -51,7 +51,7 @@ struct OnboardingView: View {
                     if !m.preflight.claude { ToolRow(name: "Claude CLI", cmd: "claude.ai/download") }
                 }
                 .padding(14)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Paper.danger.opacity(0.08)))
+                .glassSurface(12, tint: Paper.danger.opacity(0.14))
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Paper.danger.opacity(0.22), lineWidth: 0.75))
                 .frame(maxWidth: 320).padding(.top, 14)
             }
