@@ -102,7 +102,10 @@ final class AppController: NSObject, NSApplicationDelegate {
 
         let glass = NSGlassEffectView(frame: content)
         glass.cornerRadius = CORNER
-        glass.tintColor = NSColor(srgbRed: 0.97, green: 0.94, blue: 0.89, alpha: 0.42)
+        // Just a hint of warmth so the material still reads as glass (it samples and
+        // refracts the desktop) rather than a flat tinted card. The brand warmth
+        // comes from the content surfaces, not from drowning the material in tint.
+        glass.tintColor = NSColor(srgbRed: 0.99, green: 0.96, blue: 0.91, alpha: 0.14)
         glass.contentView = hosting
         glass.appearance = NSAppearance(named: .aqua)
         return glass
