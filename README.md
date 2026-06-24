@@ -80,9 +80,15 @@ with `gws auth login` (see the `gws` docs for multi-account setup).
 ./bin/inbox-keeper app         # launch the menu-bar app
 ./bin/inbox-keeper dashboard   # or open the panel in your browser
 ./bin/inbox-keeper run         # run the keeper now across all accounts
+./bin/inbox-keeper schedule    # run it automatically every morning (07:00)
+./bin/inbox-keeper unschedule  # remove the daily schedule
 ./bin/inbox-keeper state       # refresh the panel data
 ./bin/inbox-keeper stop        # stop the local panel server
 ```
+
+Replies are drafted in your voice. To give the drafter more background (who you
+are, how you write), drop a `knowledge/profile.md` (or `knowledge/<account-slug>.md`)
+in the repo; it's optional and read only when present.
 
 Click the menu-bar icon to open the panel. Hit **Run keeper now** to tidy every
 inbox to only what needs you. Click any loop to open it in Gmail, or hover it to

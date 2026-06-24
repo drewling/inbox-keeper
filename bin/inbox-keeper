@@ -81,16 +81,60 @@ for a in accts:
     fi
     ;;
 
+  schedule)
+    # Install a LaunchAgent that runs the keeper every morning. Hour is arg 2 (default 7).
+    HOUR="${2:-7}"
+    LABEL="com.drewl.inbox-keeper.daily"
+    PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+    mkdir -p "$HOME/Library/LaunchAgents" "$MAIL_TRIAGE_LOGS"
+    cat > "$PLIST" <<PL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$SCRIPT_DIR/inbox-keeper</string>
+    <string>run</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>$HOUR</integer><key>Minute</key><integer>0</integer></dict>
+  <key>EnvironmentVariables</key>
+  <dict><key>GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND</key><string>file</string></dict>
+  <key>StandardOutPath</key><string>$MAIL_TRIAGE_LOGS/daily.out.log</string>
+  <key>StandardErrorPath</key><string>$MAIL_TRIAGE_LOGS/daily.err.log</string>
+</dict>
+</plist>
+PL
+    launchctl unload "$PLIST" 2>/dev/null || true
+    if launchctl load -w "$PLIST" 2>/dev/null; then
+      echo "Scheduled: the keeper runs daily at $(printf '%02d:00' "$HOUR"). Logs in $MAIL_TRIAGE_LOGS."
+    else
+      echo "Wrote $PLIST but couldn't load it; run: launchctl load -w \"$PLIST\""
+    fi
+    ;;
+
+  unschedule)
+    LABEL="com.drewl.inbox-keeper.daily"
+    PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+    launchctl unload "$PLIST" 2>/dev/null || true
+    rm -f "$PLIST"
+    echo "Unscheduled the daily keeper."
+    ;;
+
   *)
     cat <<'USAGE'
-inbox-keeper — mail triage panel CLI
+inbox-keeper — keep every inbox at "only what needs you"
 
 Usage:
-  inbox-keeper dashboard   Start the web panel (if not running) and open it in the browser
-  inbox-keeper app         Build (if needed) and open the native menu-bar app
-  inbox-keeper run         Run the keeper pass for all accounts, then refresh dashboard state
-  inbox-keeper state       Refresh app/state.json without opening the panel
-  inbox-keeper stop        Kill the running keeper server
+  inbox-keeper app           Build (if needed) and open the native menu-bar app
+  inbox-keeper dashboard     Start the web panel and open it in your browser
+  inbox-keeper run           Run the keeper across all accounts, then refresh state
+  inbox-keeper state         Refresh the panel's data without opening anything
+  inbox-keeper schedule [H]  Run the keeper automatically every morning (hour H, default 7)
+  inbox-keeper unschedule    Remove the daily schedule
+  inbox-keeper stop          Stop the local panel server
 
 USAGE
     ;;

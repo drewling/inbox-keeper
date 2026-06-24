@@ -83,7 +83,13 @@ cat <<'NEXT'
    Or open the native menu-bar app (requires the build step above):
      ./bin/inbox-keeper app
 
-3. To run the full keeper pass for all accounts:
+3. Run the keeper across all accounts now:
      ./bin/inbox-keeper run
+
+4. Have it run automatically every morning (07:00):
+     ./bin/inbox-keeper schedule
+
+(The Slack draft-review pipeline is optional and legacy; see docs/SETUP.md and
+deploy/install.sh only if you specifically want it.)
 
 NEXT

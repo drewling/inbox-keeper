@@ -239,8 +239,8 @@ def _name_from_email(email):
     """Best-effort display name from an address local-part (e.g. jane.doe -> Jane Doe)."""
     import re
     local = (email or "").split("@")[0]
-    parts = [p for p in re.split(r"[._-]+", local) if p and not p.isdigit()]
-    return " ".join(p.capitalize() for p in parts)
+    parts = [re.sub(r"\d+$", "", p) for p in re.split(r"[._-]+", local)]
+    return " ".join(p.capitalize() for p in parts if p)
 
 
 def _gen_draft(payload):
@@ -285,13 +285,25 @@ def _gen_draft(payload):
     to_email = parseaddr(chosen)[1] or ""
     voice = learning.learned_text()
     voice_block = f"\nVOICE NOTES learned from the user's past edits:\n{voice}\n" if voice.strip() else ""
+    # Optional profile context: knowledge/<slug>.md, then knowledge/profile.md.
+    prof_block = ""
+    for fn in (f"{slug}.md", "profile.md"):
+        p = os.path.join(ROOT, "knowledge", fn)
+        if os.path.exists(p):
+            try:
+                txt = open(p).read().strip()
+            except Exception:
+                txt = ""
+            if txt:
+                prof_block = "\nABOUT THE USER (background for voice/context, do not quote verbatim):\n" + txt[:1500] + "\n"
+            break
     voice_desc = f"{owner_name}'s voice" if owner_name else "the user's voice"
     sign = f' Sign off as "{owner_first}".' if owner_first else ""
     prompt = (
         f"Draft a reply in {voice_desc} to the email thread below. First person, warm and concise "
         "(2-6 sentences), match the sender's language and level of formality, reference real thread "
         "context, never invent facts, figures or dates (use placeholders like [day]/[amount] if "
-        f"needed).{sign} Reply to {to_name}.{voice_block}"
+        f"needed).{sign} Reply to {to_name}.{prof_block}{voice_block}"
         + (f"\nADJUSTMENT requested: {steer}\n" if steer else "")
         + f"\nSubject: {subject}\nThread (oldest to newest):\n" + "\n".join(convo[-8:])
         + "\n\nOutput ONLY the reply body text, no preamble, no subject line."

@@ -15,6 +15,16 @@
 #   bash deploy/install.sh --unload
 set -euo pipefail
 
+# ---------------------------------------------------------------------------
+# LEGACY (Slack pipeline). This installs the old run.sh daily job and the
+# always-on Slack draft-review daemon. For the current product, use the keeper's
+# own scheduler instead:  ./bin/inbox-keeper schedule
+# This script is kept only for the opt-in Slack/draft flow.
+# ---------------------------------------------------------------------------
+echo "NOTE: deploy/install.sh sets up the LEGACY Slack pipeline + run.sh daily job."
+echo "      For the inbox-keeper app, use: ./bin/inbox-keeper schedule"
+echo ""
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../config.sh
 source "$SCRIPT_DIR/../config.sh"
