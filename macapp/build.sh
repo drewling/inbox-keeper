@@ -13,11 +13,13 @@ echo "Building inbox-keeper.app ..."
 rm -rf "$APP"
 mkdir -p "$MACOS" "$RES"
 
+# macOS 26 (Tahoe) target: the panel uses the real Liquid Glass API
+# (NSGlassEffectView) and SwiftUI, hosted in a native menu-bar shell.
 swiftc -O \
-  -target arm64-apple-macosx13.0 \
-  -framework AppKit -framework WebKit \
+  -target arm64-apple-macosx26.0 \
+  -framework AppKit -framework SwiftUI \
   -o "$MACOS/inbox-keeper" \
-  "$HERE/Sources/main.swift"
+  "$HERE"/Sources/*.swift
 
 cp "$HERE/Info.plist" "$APP/Contents/Info.plist"
 
