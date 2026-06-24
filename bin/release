@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# bin/release — tag and publish a new inbox-keeper release
+# Usage: bin/release <version>   e.g.  bin/release 1.2.0
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# ── 1. Argument check ────────────────────────────────────────────────────────
+VERSION="${1:-}"
+if [[ -z "$VERSION" ]]; then
+  echo "Usage: bin/release <version>  (e.g. bin/release 1.2.0)" >&2
+  exit 1
+fi
+TAG="v${VERSION}"
+
+echo "==> Releasing inbox-keeper ${TAG}"
+
+# ── 2. Clean working tree on master ─────────────────────────────────────────
+echo "==> Checking working tree..."
+BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD)"
+if [[ "$BRANCH" != "master" ]]; then
+  echo "ERROR: must be on master (currently on '$BRANCH')." >&2
+  exit 1
+fi
+
+if ! git -C "$REPO_ROOT" diff --quiet || ! git -C "$REPO_ROOT" diff --cached --quiet; then
+  echo "ERROR: working tree is dirty. Commit or stash changes first." >&2
+  exit 1
+fi
+
+# ── 3. Verify CHANGELOG has a section for this version ──────────────────────
+CHANGELOG="$REPO_ROOT/CHANGELOG.md"
+echo "==> Verifying CHANGELOG.md has a [${VERSION}] section..."
+if ! grep -qE "^## \[${VERSION}\]" "$CHANGELOG"; then
+  echo "ERROR: CHANGELOG.md has no '## [${VERSION}]' section." >&2
+  echo "       Add release notes before running bin/release." >&2
+  exit 1
+fi
+
+# ── 4. Build the app and DMG ─────────────────────────────────────────────────
+echo "==> Building inbox-keeper.app..."
+bash "$REPO_ROOT/macapp/build.sh"
+
+echo "==> Building inbox-keeper.dmg..."
+bash "$REPO_ROOT/macapp/make-dmg.sh"
+
+DMG="$REPO_ROOT/macapp/build/inbox-keeper.dmg"
+if [[ ! -f "$DMG" ]]; then
+  echo "ERROR: DMG not found at $DMG after build." >&2
+  exit 1
+fi
+
+# ── 5. Extract release notes for this version ───────────────────────────────
+echo "==> Extracting release notes for ${VERSION}..."
+NOTES_FILE="$(mktemp /tmp/inbox-keeper-release-notes.XXXXXX.md)"
+trap 'rm -f "$NOTES_FILE"' EXIT
+
+# Grab lines between ## [VERSION] and the next ## [ heading (exclusive).
+awk "/^## \[${VERSION}\]/{found=1; next} found && /^## \[/{exit} found{print}" \
+  "$CHANGELOG" > "$NOTES_FILE"
+
+if [[ ! -s "$NOTES_FILE" ]]; then
+  echo "ERROR: Could not extract notes for [${VERSION}] from CHANGELOG.md." >&2
+  exit 1
+fi
+
+# ── 6. Create and push the tag ───────────────────────────────────────────────
+echo "==> Creating tag ${TAG}..."
+if git -C "$REPO_ROOT" rev-parse "$TAG" >/dev/null 2>&1; then
+  echo "WARNING: tag ${TAG} already exists locally — skipping tag creation."
+else
+  git -C "$REPO_ROOT" tag -a "$TAG" -m "inbox-keeper ${VERSION}"
+fi
+
+echo "==> Pushing tag ${TAG} to origin..."
+git -C "$REPO_ROOT" push origin "$TAG"
+
+# ── 7. Create GitHub release ─────────────────────────────────────────────────
+echo "==> Creating GitHub release ${TAG}..."
+RELEASE_URL="$(gh release create "$TAG" "$DMG" \
+  --title "inbox-keeper ${VERSION}" \
+  --notes-file "$NOTES_FILE" \
+  --repo drewling/inbox-keeper)"
+
+echo ""
+echo "==> Done! Release published at:"
+echo "    ${RELEASE_URL}"

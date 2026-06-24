@@ -139,6 +139,25 @@ voice; do not introduce a different style in the same file.
 4. The core invariant is that nothing is ever deleted and every archive is
    reversible. Any PR that risks that property will not be merged.
 
+## Releasing
+
+> This section is for maintainers.
+
+1. Bump the version in any relevant source files (Swift `CFBundleShortVersionString`, etc.).
+2. Add a `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` (following Keep a Changelog 1.1.0).
+   Move items out of `## [Unreleased]` into the new section.
+3. Commit those changes to `master` and push.
+4. Run the release script:
+   ```bash
+   bin/release X.Y.Z
+   ```
+   The script will verify the working tree is clean, confirm the changelog section exists, build the
+   `.app` and `.dmg`, create and push the git tag, then publish a GitHub release with the extracted
+   changelog notes and the `.dmg` attached.
+
+**Known caveat — unsigned/un-notarized binary.** The `.dmg` is not signed or notarized. Users who
+download it must right-click the app and choose "Open" on first launch to bypass Gatekeeper.
+
 ## Reporting bugs
 
 Open an issue with:
