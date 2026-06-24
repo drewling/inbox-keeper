@@ -55,7 +55,6 @@ cp "$REPO/config.py"              "$PAYLOAD/config.py"
 cp "$REPO/config.sh"              "$PAYLOAD/config.sh"
 cp "$REPO/keep-policy.md"         "$PAYLOAD/keep-policy.md"
 cp "$REPO/categories.json"        "$PAYLOAD/categories.json"
-cp "$REPO/TRIAGE.md"              "$PAYLOAD/TRIAGE.md"
 cp "$REPO/accounts.json.example"  "$PAYLOAD/accounts.json.example"
 
 # --- knowledge/ — ONLY the generic example template, never personal profiles ---

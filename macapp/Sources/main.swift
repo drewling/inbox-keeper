@@ -82,7 +82,7 @@ private func seedFromBundle() -> String? {
         try? fm.copyItem(at: src, to: dst)
     }
     // Code + templates — safe to refresh (never user data). knowledge: only the template.
-    ["lib", "bin", "config.py", "config.sh", "TRIAGE.md",
+    ["lib", "bin", "config.py", "config.sh",
      "accounts.json.example", "knowledge/profile.example.md"].forEach(overwrite)
     // User-editable — seed once, then leave their edits alone.
     ["keep-policy.md", "categories.json"].forEach(seedIfMissing)
@@ -261,9 +261,30 @@ final class AppController: NSObject, NSApplicationDelegate {
             let img = NSImage(systemSymbolName: "tray.full", accessibilityDescription: "zero")
             img?.isTemplate = true
             button.image = img
-            button.action = #selector(togglePanel)
+            button.action = #selector(statusItemClicked)
             button.target = self
+            // Receive both mouse-up events so we can distinguish right-click.
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
+    }
+
+    @objc func statusItemClicked() {
+        guard NSApp.currentEvent?.type == .rightMouseUp else { togglePanel(); return }
+        // Right-click: show a single "Quit zero" NSMenu, then clear it so
+        // the next left-click still goes through togglePanel (not the menu).
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        let menu = NSMenu()
+        if let v = version {
+            let versionItem = NSMenuItem(title: "zero \(v)", action: nil, keyEquivalent: "")
+            versionItem.isEnabled = false
+            menu.addItem(versionItem)
+            menu.addItem(.separator())
+        }
+        menu.addItem(NSMenuItem(title: "Quit zero", action: #selector(NSApplication.terminate(_:)),
+                                keyEquivalent: "q"))
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)   // open the menu
+        statusItem.menu = nil                  // clear immediately so left-click stays toggle
     }
 
     func setupPanel() {

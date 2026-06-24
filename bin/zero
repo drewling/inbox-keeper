@@ -28,12 +28,26 @@ case "$SUBCOMMAND" in
   run)
     export GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file
 
+    # Read grace_days from app/settings.json (fallback 0) so scheduled runs honor the UI setting.
+    GRACE_DAYS=$("$MAIL_TRIAGE_PYTHON" -c '
+import json, os, sys
+settings_path = os.path.join(os.path.dirname(sys.argv[1]), "app", "settings.json")
+try:
+    g = json.load(open(settings_path)).get("grace_days", 0)
+except Exception:
+    g = 0
+print(int(g))
+' "$MAIL_TRIAGE_ACCOUNTS" 2>/dev/null || echo 0)
+
     # Parse accounts.json (list OR {"accounts":[...]}) and run the keeper per account.
+    # Only include accounts where enabled != false (backward-compatible default: enabled).
     accounts=$("$MAIL_TRIAGE_PYTHON" -c '
 import json, sys
 data = json.load(open(sys.argv[1]))
 accts = data if isinstance(data, list) else data.get("accounts", [])
 for a in accts:
+    if a.get("enabled", True) is False:
+        continue
     print("\t".join([a["config_dir"], a.get("email", a.get("slug", "")),
                      a.get("slug", a.get("email", ""))]))
 ' "$MAIL_TRIAGE_ACCOUNTS")
@@ -42,7 +56,7 @@ for a in accts:
       [ -z "$config_dir" ] && continue
       echo "--- Running keeper pass for: $slug ($email) ---"
       "$MAIL_TRIAGE_PYTHON" "$MAIL_TRIAGE_LIB/review_open_loops.py" \
-        "$config_dir" "$email" --grace-days 0 --execute
+        "$config_dir" "$email" --grace-days "$GRACE_DAYS" --execute
     done <<< "$accounts"
 
     echo "--- Learning from recent actions ---"
@@ -69,34 +83,64 @@ for a in accts:
     ;;
 
   schedule)
-    # Install a LaunchAgent that runs the keeper every morning. Hour is arg 2 (default 7).
-    HOUR="${2:-7}"
+    # Install a LaunchAgent. Reads schedule settings from app/settings.json if present.
+    # Hour can be overridden as arg 2 (default 7) for quick CLI install.
+    HOUR="${2:-}"
     LABEL="com.drewl.zero.daily"
     PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
     mkdir -p "$HOME/Library/LaunchAgents" "$MAIL_TRIAGE_LOGS"
-    cat > "$PLIST" <<PL
-<?xml version="1.0" encoding="UTF-8"?>
+    # Generate plist via Python so schedule_days produces the correct <array> shape
+    # (consistent with keeper_server._rewrite_schedule_plist). Prints HH:MM to stdout.
+    SCHEDULE_TIME=$("$MAIL_TRIAGE_PYTHON" - \
+        "$MAIL_TRIAGE_ACCOUNTS" "$SCRIPT_DIR/zero" "$PLIST" "$MAIL_TRIAGE_LOGS" "$HOUR" <<'PYEOF'
+import json, os, sys
+accounts_path, zero_bin, plist_path, logs_dir, hour_override = sys.argv[1:]
+settings_path = os.path.join(os.path.dirname(accounts_path), "app", "settings.json")
+try:
+    s = json.load(open(settings_path))
+except Exception:
+    s = {}
+hour   = int(hour_override) if hour_override else int(s.get("schedule_hour", 7))
+minute = int(s.get("schedule_minute", 0))
+days   = s.get("schedule_days", [1, 2, 3, 4, 5])
+if days:
+    interval_entries = "\n".join(
+        f"    <dict><key>Weekday</key><integer>{d}</integer>"
+        f"<key>Hour</key><integer>{hour}</integer>"
+        f"<key>Minute</key><integer>{minute}</integer></dict>"
+        for d in days
+    )
+    start_interval = f"  <key>StartCalendarInterval</key>\n  <array>\n{interval_entries}\n  </array>"
+else:
+    start_interval = (f"  <key>StartCalendarInterval</key>\n"
+                      f"  <dict><key>Hour</key><integer>{hour}</integer>"
+                      f"<key>Minute</key><integer>{minute}</integer></dict>")
+label = "com.drewl.zero.daily"
+xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>$LABEL</string>
+  <key>Label</key><string>{label}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$SCRIPT_DIR/zero</string>
+    <string>{zero_bin}</string>
     <string>run</string>
   </array>
-  <key>StartCalendarInterval</key>
-  <dict><key>Hour</key><integer>$HOUR</integer><key>Minute</key><integer>0</integer></dict>
+{start_interval}
   <key>EnvironmentVariables</key>
   <dict><key>GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND</key><string>file</string></dict>
-  <key>StandardOutPath</key><string>$MAIL_TRIAGE_LOGS/daily.out.log</string>
-  <key>StandardErrorPath</key><string>$MAIL_TRIAGE_LOGS/daily.err.log</string>
+  <key>StandardOutPath</key><string>{logs_dir}/daily.out.log</string>
+  <key>StandardErrorPath</key><string>{logs_dir}/daily.err.log</string>
 </dict>
 </plist>
-PL
+"""
+open(plist_path, "w").write(xml)
+print(f"{hour:02d}:{minute:02d}")
+PYEOF
+    )
     launchctl unload "$PLIST" 2>/dev/null || true
     if launchctl load -w "$PLIST" 2>/dev/null; then
-      echo "Scheduled: the keeper runs daily at $(printf '%02d:00' "$HOUR"). Logs in $MAIL_TRIAGE_LOGS."
+      echo "Scheduled: the keeper runs at $SCHEDULE_TIME on configured days. Logs in $MAIL_TRIAGE_LOGS."
     else
       echo "Wrote $PLIST but couldn't load it; run: launchctl load -w \"$PLIST\""
     fi

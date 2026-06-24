@@ -77,8 +77,27 @@ final class KeeperModel: ObservableObject {
 
     // Timing: protect mail newer than N days (the keeper run honors this).
     @Published var graceDays: Int = 0
+    // Schedule settings (loaded from server; defaults match server defaults).
+    @Published var scheduleHour: Int = 7
+    @Published var scheduleMinute: Int = 0
+    @Published var scheduleDays: Set<Int> = [1, 2, 3, 4, 5]
+    @Published var notifyOnRun: Bool = true
+    @Published var autoDraft: Bool = false
+    @Published var provider: String = "claude"
+    // Provider availability — fetched alongside settings on panel open.
+    @Published var providerStatus: ProviderStatus?
     // First-run backlog offer: shown once after the first inbox connects.
     @Published var backlogOffered: Bool = UserDefaults.standard.bool(forKey: "backlogOffered")
+
+    // ponytail: transient flags for delight moments — no persistence needed
+    /// Pulses true briefly after a reload so the header can sweep a "fresh" sheen.
+    @Published var refreshSheenToken: UUID = UUID()
+    /// Set to true for ~0.8 s after a send succeeds so the composer can show a confirmation.
+    @Published var sentConfirmation: Bool = false
+
+    /// True once the server has responded to at least one /api/state call.
+    /// Guards against showing onboarding or main UI while the server is still booting.
+    @Published var serverReady = false
 
     let api: KeeperAPI
     private var pollTask: Task<Void, Never>?
@@ -96,9 +115,12 @@ final class KeeperModel: ObservableObject {
     }
 
     /// Show the welcome/setup takeover until at least one account is connected.
+    /// Returns false while the server is still booting or rebuilding state — prevents
+    /// the premature onboarding flash when the server returns empty accounts mid-build.
     var needsOnboarding: Bool {
         if ProcessInfo.processInfo.environment["KEEPER_ONBOARD"] == "1" { return true }  // dev/preview
-        guard let s = state else { return false }   // nil → still loading (skeleton)
+        // ponytail: gate on serverReady so a boot with empty accounts never flashes onboarding
+        guard serverReady, let s = state, !(s.building ?? false) else { return false }
         return s.accounts.isEmpty
     }
 
@@ -149,27 +171,111 @@ final class KeeperModel: ObservableObject {
         autoRanThisOpen = false
         runPreflight()
         Task {
-            await reload()
+            // If the server isn't ready yet, retry reaching it every 600 ms for up to
+            // 25 attempts (~15 s). Only toast "Can't reach" once the budget is exhausted.
+            // ponytail: loop capped at 25; no exponential back-off needed for a local server.
+            if !serverReady {
+                var attempts = 0
+                while !serverReady && attempts < 25 {
+                    if let s = try? await api.state() {
+                        state = s
+                        if !s.needsBuild { policyDraft = s.policy }
+                        serverReady = true
+                        refreshSheenToken = UUID()
+                    } else {
+                        attempts += 1
+                        try? await Task.sleep(nanoseconds: 600_000_000)
+                    }
+                }
+                if !serverReady {
+                    toast("Can't reach the zero server")
+                    return
+                }
+            } else {
+                await reload()
+            }
             await checkCredentials()
             await loadCategories()
             await loadSettings()
+            await fetchProviderStatus()
             await syncJob()
             maybeAutoRun()
         }
     }
 
-    /// Pull timing settings from the server (grace window).
+    /// Pull timing settings from the server (grace window + schedule + flags).
     func loadSettings() async {
-        if let s = try? await api.settings() { graceDays = s.graceDays }
+        guard let s = try? await api.settings() else { return }
+        graceDays = s.graceDays
+        scheduleHour = s.scheduleHour
+        scheduleMinute = s.scheduleMinute
+        scheduleDays = Set(s.scheduleDays)
+        notifyOnRun = s.notifyOnRun
+        autoDraft = s.autoDraft
+        provider = s.provider
     }
 
     /// Persist the grace window; honored by the next keeper run.
     func saveGraceDays(_ n: Int) {
         graceDays = n
         Task {
-            do { try await api.saveSettings(graceDays: n) }
-            catch { toast("Couldn’t save timing") }
+            do { try await api.saveSettings(["grace_days": n]) }
+            catch { toast("Couldn't save timing") }
         }
+    }
+
+    /// Persist schedule fields in one PUT, updating local state from the merged result.
+    func saveSchedule() {
+        let partial: [String: Any] = [
+            "schedule_hour": scheduleHour,
+            "schedule_minute": scheduleMinute,
+            "schedule_days": Array(scheduleDays).sorted(),
+        ]
+        Task {
+            do {
+                let s = try await api.saveSettings(partial)
+                scheduleHour = s.scheduleHour; scheduleMinute = s.scheduleMinute
+                scheduleDays = Set(s.scheduleDays)
+            } catch { toast("Couldn't save schedule") }
+        }
+    }
+
+    func saveNotifyOnRun(_ v: Bool) {
+        notifyOnRun = v
+        Task {
+            do { try await api.saveSettings(["notify_on_run": v]) }
+            catch { toast("Couldn't save notification preference") }
+        }
+    }
+
+    func saveAutoDraft(_ v: Bool) {
+        autoDraft = v
+        Task {
+            do { try await api.saveSettings(["auto_draft": v]) }
+            catch { toast("Couldn't save draft preference") }
+        }
+    }
+
+    /// Switch to a different AI provider. The server validates that it's available; a
+    /// 400 means the provider isn't installed — surface that as a toast.
+    func saveProvider(_ name: String) {
+        let previous = provider
+        provider = name
+        Task {
+            do {
+                let s = try await api.saveSettings(["provider": name])
+                provider = s.provider
+            } catch let KeeperAPI.KeeperError.http(_, msg) where !msg.isEmpty {
+                provider = previous; toast(msg)
+            } catch {
+                provider = previous; toast("Couldn't switch provider")
+            }
+        }
+    }
+
+    /// Refresh provider availability (e.g. user just installed a new CLI).
+    func fetchProviderStatus() async {
+        providerStatus = try? await api.providerStatus()
     }
 
     /// Whether a Google OAuth client is configured. Drives the onboarding credential
@@ -193,7 +299,7 @@ final class KeeperModel: ObservableObject {
             } catch let KeeperAPI.KeeperError.http(_, msg) where !msg.isEmpty {
                 toast(msg)   // surface the server's specific guidance (bad paste, etc.)
             } catch {
-                toast("Couldn’t save those credentials")
+                toast("Couldn't save those credentials")
             }
         }
     }
@@ -208,9 +314,13 @@ final class KeeperModel: ObservableObject {
         if let s = try? await api.state() {
             state = s
             if !s.needsBuild { policyDraft = s.policy }
+            serverReady = true   // mark ready on any successful response
+            // Moment 9: bump the sheen token so observers can sweep a "fresh" highlight.
+            refreshSheenToken = UUID()
         } else if state == nil {
-            toast("Can’t reach the zero server")
+            toast("Can't reach the zero server")
         }
+        // If state != nil and we get a transient failure, stay silent (keep showing last-known state).
     }
 
     /// Adopt whatever the server says about the current job. If it's running, make
@@ -271,7 +381,7 @@ final class KeeperModel: ObservableObject {
             } catch let KeeperAPI.KeeperError.http(code, _) where code == 409 {
                 job = nil; toast("zero is already running")
             } catch {
-                job = nil; toast("Couldn’t start — check the server")
+                job = nil; toast("Couldn't start — check the server")
             }
         }
     }
@@ -316,8 +426,35 @@ final class KeeperModel: ObservableObject {
 
     private func failJob(_ j: Job) async {
         await reload()
-        let what = j.kind == "add_account" ? "Couldn’t add account" : "Run failed"
-        toast(what + ": " + (j.error ?? "unknown"))
+        if j.kind == "add_account" {
+            // Refresh credential status: if the OAuth client is now missing, let the
+            // CredentialsCard surface (needsCredentials → true) rather than toasting the
+            // long setup wall. If the client IS present, show the server's short error.
+            await checkCredentials()
+            if !hasClient {
+                // needsCredentials is now true → CredentialsCard shows automatically.
+                return
+            }
+            // Server now returns a short error when the client is present.
+            // Cap at 120 chars defensively so a multi-line message never floods the toast.
+            let raw = j.error ?? "Sign-in failed"
+            let msg = raw.count > 120 ? String(raw.prefix(117)) + "…" : raw
+            toast("Couldn't add account: " + msg)
+        } else {
+            toast("Run failed: " + (j.error ?? "unknown"))
+        }
+    }
+
+    // MARK: cancel job
+
+    /// Cancel the currently running sign-in (or any job) and refresh state.
+    func cancelJob() {
+        Task {
+            try? await api.cancelJob()
+            job = nil   // optimistic clear
+            await reload()
+            await syncJob()
+        }
     }
 
     // MARK: set-aside (dismiss) + per-thread undo
@@ -332,7 +469,7 @@ final class KeeperModel: ObservableObject {
                 toast("Set aside") { [weak self] in self?.restoreThread(loop, slug: slug, label: label) }
                 await reload()   // pull the server's bumped Undo bucket so the count moves now
             } catch {
-                toast("Couldn’t set aside")
+                toast("Couldn't set aside")
                 await reload()
             }
         }
@@ -352,7 +489,7 @@ final class KeeperModel: ObservableObject {
         let text = policyDraft
         Task {
             do { try await api.savePolicy(text); state?.policy = text; toast("Policy saved") }
-            catch { toast("Couldn’t save policy") }
+            catch { toast("Couldn't save policy") }
         }
     }
 
@@ -366,7 +503,7 @@ final class KeeperModel: ObservableObject {
         catch {
             // Don't clobber an in-memory edit, but surface a hard failure so an empty
             // editor isn't mistaken for "no categories".
-            if categoriesDraft.isEmpty { toast("Couldn’t load categories") }
+            if categoriesDraft.isEmpty { toast("Couldn't load categories") }
         }
     }
 
@@ -394,7 +531,7 @@ final class KeeperModel: ObservableObject {
                 state?.categories = clean
                 toast("Categories saved — applied on the next run")
             } catch {
-                toast("Couldn’t save categories")
+                toast("Couldn't save categories")
             }
         }
     }
@@ -419,7 +556,7 @@ final class KeeperModel: ObservableObject {
                 cleanup?.loading = false
             } catch {
                 guard cleanup?.slug == slug else { return }
-                cleanup?.loading = false; cleanup?.error = "Couldn’t load labels"
+                cleanup?.loading = false; cleanup?.error = "Couldn't load labels"
             }
         }
     }
@@ -452,7 +589,7 @@ final class KeeperModel: ObservableObject {
                 toast(r.failed == 0 ? "Removed \(r.deleted) label\(r.deleted == 1 ? "" : "s")"
                                     : "Removed \(r.deleted), \(r.failed) failed")
             } catch {
-                toast("Couldn’t delete labels")
+                toast("Couldn't delete labels")
             }
         }
     }
@@ -470,8 +607,8 @@ final class KeeperModel: ObservableObject {
         guard !key.isEmpty, !locallyRejected.contains(key) else { return }
         locallyRejected.insert(key)
         Task {
-            do { try await api.rejectLearned(key); toast("Removed — it won’t come back") }
-            catch { locallyRejected.remove(key); toast("Couldn’t remove that") }
+            do { try await api.rejectLearned(key); toast("Removed — it won't come back") }
+            catch { locallyRejected.remove(key); toast("Couldn't remove that") }
         }
     }
 
@@ -495,14 +632,14 @@ final class KeeperModel: ObservableObject {
             defer { composerLoading = false }
             do {
                 let d = try await api.draft(slug: row.account.slug, threadId: row.loop.threadId, steer: steer)
-                guard let body = d.body, !body.isEmpty else { toast("Couldn’t draft a reply"); return }
+                guard let body = d.body, !body.isEmpty else { toast("Couldn't draft a reply"); return }
                 composerOriginal = body
                 composerText = body
                 if let e = d.toEmail, !e.isEmpty { composerToEmail = e }
                 if let s = d.subject, !s.isEmpty { composerSubject = s }
             } catch is CancellationError {
             } catch {
-                toast("Couldn’t draft — write one or try Regenerate")
+                toast("Couldn't draft — write one or try Regenerate")
             }
         }
     }
@@ -526,11 +663,15 @@ final class KeeperModel: ObservableObject {
                                    body: text, html: body, original: composerOriginal)
                 Haptic.tap()
                 if state != nil { state!.dropLoop(slug: row.account.slug, threadId: row.loop.threadId) }
+                // Moment 7: show the sent checkmark briefly, then close.
+                sentConfirmation = true
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                sentConfirmation = false
                 closeComposer()
                 toast("Reply sent")
             } catch {
                 composerSending = false
-                toast("Couldn’t send — check Gmail before retrying")
+                toast("Couldn't send — check Gmail before retrying")
             }
         }
     }

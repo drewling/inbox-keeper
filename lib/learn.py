@@ -18,13 +18,13 @@ can read and edit. With too few signals it writes nothing.
 
 Usage: learn.py [--min 2]
 """
-import argparse, os, re, subprocess, sys
+import argparse, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import learning  # noqa: E402
 
-CLAUDE = os.environ.get("CLAUDE_BIN", "claude")
+import llm as _llm  # noqa: E402
 
 # Only voice edits feed the LLM rollup now.
 VOICE_PROMPT = (
@@ -140,15 +140,10 @@ def build(min_signals):
                 f"- DRAFT EDITED: orig=\"{(s.get('original_snippet') or '')[:160]}\" "
                 f"final=\"{(s.get('final') or '')[:200]}\""
             )
-        try:
-            r = subprocess.run(
-                [CLAUDE, "-p", VOICE_PROMPT + "\n".join(lines), "--model", "haiku"],
-                capture_output=True, text=True, timeout=150
-            )
-        except subprocess.TimeoutExpired:
-            r = None
-        if r and r.returncode == 0 and r.stdout.strip():
-            voice_text = _filter_rejected(r.stdout.strip(), rejected)
+        voice_raw, voice_ok = _llm.run_prompt(VOICE_PROMPT + "\n".join(lines),
+                                               model="haiku", timeout=150)
+        if voice_ok and voice_raw.strip():
+            voice_text = _filter_rejected(voice_raw.strip(), rejected)
             if voice_text.strip():
                 sections.append(voice_text.strip())
 

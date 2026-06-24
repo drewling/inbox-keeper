@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # setup.sh — First-time setup for mail-triage.
 #
-# Checks dependencies, creates the Slack app venv, and scaffolds config files.
+# Checks dependencies and scaffolds config files.
 # Safe to run multiple times (idempotent).
 #
 # After running this script:
 #   1. Edit accounts.json with your Gmail accounts and gws config dirs.
-#   2. Edit slack_app/config.env with your Slack tokens.
-#   3. Run: bash deploy/install.sh     (to register the launchd agents)
+#   2. Authenticate each account: GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file gws auth login
+#   3. Run: ./bin/zero app
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,15 +32,15 @@ echo "Checking dependencies..."
 if command -v gws >/dev/null 2>&1; then
   good "gws found: $(command -v gws)"
 else
-  warn "gws not found. Install from https://github.com/nicholasgasior/gws-cli or via npm."
-  info "  brew install node && npm install -g @nicholasgasior/gws-cli"
+  warn "gws not found."
+  info "  brew install node && npm install -g @googleworkspace/cli"
 fi
 
 if command -v claude >/dev/null 2>&1; then
   good "claude CLI found: $(command -v claude)"
 else
-  warn "claude CLI not found. Install from https://github.com/anthropics/claude-code"
-  info "  npm install -g @anthropic-ai/claude-code"
+  warn "claude CLI not found."
+  info "  npm install -g @anthropic-ai/claude-code && claude"
 fi
 
 if command -v python3 >/dev/null 2>&1; then
@@ -58,46 +58,9 @@ fi
 echo ""
 
 # ---------------------------------------------------------------------------
-# 2. Create slack_app venv
-# ---------------------------------------------------------------------------
-echo "Setting up Slack app Python venv..."
-
-VENV_DIR="$MAIL_TRIAGE_DIR/slack_app/venv"
-if [ -d "$VENV_DIR" ]; then
-  good "venv already exists: $VENV_DIR"
-else
-  python3 -m venv "$VENV_DIR"
-  good "Created venv: $VENV_DIR"
-fi
-
-REQS="$MAIL_TRIAGE_DIR/slack_app/requirements.txt"
-if [ -f "$REQS" ]; then
-  "$VENV_DIR/bin/pip" install --quiet -r "$REQS"
-  good "Installed Slack app requirements"
-else
-  warn "slack_app/requirements.txt not found — skipping pip install"
-fi
-
-echo ""
-
-# ---------------------------------------------------------------------------
-# 3. Scaffold config files
+# 2. Scaffold config files
 # ---------------------------------------------------------------------------
 echo "Checking config files..."
-
-SLACK_ENV="$MAIL_TRIAGE_DIR/slack_app/config.env"
-SLACK_ENV_EXAMPLE="$MAIL_TRIAGE_DIR/slack_app/config.env.example"
-if [ -f "$SLACK_ENV" ]; then
-  good "slack_app/config.env already exists"
-else
-  if [ -f "$SLACK_ENV_EXAMPLE" ]; then
-    cp "$SLACK_ENV_EXAMPLE" "$SLACK_ENV"
-    good "Copied config.env.example → config.env"
-    info "  Edit slack_app/config.env and fill in your Slack tokens."
-  else
-    warn "slack_app/config.env.example not found"
-  fi
-fi
 
 ACCOUNTS_FILE="$MAIL_TRIAGE_DIR/accounts.json"
 if [ -f "$ACCOUNTS_FILE" ]; then
@@ -111,7 +74,7 @@ fi
 echo ""
 
 # ---------------------------------------------------------------------------
-# 4. Create required directories
+# 3. Create required directories
 # ---------------------------------------------------------------------------
 echo "Creating required directories..."
 mkdir -p "$MAIL_TRIAGE_DIR/logs" && good "logs/"
@@ -120,7 +83,7 @@ mkdir -p "$MAIL_TRIAGE_DIR/drafts" && good "drafts/"
 echo ""
 
 # ---------------------------------------------------------------------------
-# 5. Summary
+# 4. Summary
 # ---------------------------------------------------------------------------
 if [ "$ok" -eq 1 ]; then
   echo "=== All checks passed. ==="
@@ -130,8 +93,9 @@ fi
 
 echo ""
 echo "Next steps:"
-echo "  1. Authenticate each account with gws (see docs/SETUP.md)."
-echo "  2. Edit accounts.json with your account slugs, emails, and gws config dirs."
-echo "  3. Edit slack_app/config.env with your Slack bot/app tokens."
-echo "  4. Run: bash deploy/install.sh     (installs and starts launchd agents)"
+echo "  1. Edit accounts.json with your account slugs, emails, and gws config dirs."
+echo "  2. Authenticate each account:"
+echo "     GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file gws auth login"
+echo "  3. Open the app:  ./bin/zero app"
+echo "  4. Schedule daily triage:  ./bin/zero schedule"
 echo ""

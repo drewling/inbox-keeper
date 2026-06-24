@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Daily morning mail triage runner. Invokes a headless Claude orchestrator that
-# fans out one Haiku subagent per authenticated account.
+# Daily morning mail triage runner. Runs the same keeper engine the app uses
+# (review_open_loops.py) across every authenticated account, then refreshes the
+# panel's cached state and sweeps for missed items. Opt in via `zero schedule`.
 set -uo pipefail
 
 # Load the repo config (resolves MAIL_TRIAGE_DIR, MAIL_TRIAGE_PYTHON, etc.)
@@ -13,6 +14,7 @@ source "$SCRIPT_DIR/config.sh"
 export PATH="/opt/homebrew/bin:/opt/homebrew/anaconda3/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 # Do NOT export HOME here — let the launchd plist / shell environment supply it.
 export GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file
+unset GOOGLE_WORKSPACE_CLI_TOKEN
 
 mkdir -p "$MAIL_TRIAGE_LOGS"
 TS="$(date +%Y%m%d-%H%M%S)"
@@ -23,32 +25,8 @@ rc=0
 
 cd "$MAIL_TRIAGE_DIR"
 
-# Derive primary account config dir from accounts.json (no hardcoded path).
-PRIMARY_CONFIG="$(/opt/homebrew/bin/python3 -c "
-import json, sys
-a = json.load(open('$MAIL_TRIAGE_ACCOUNTS'))
-accts = a if isinstance(a, list) else a.get('accounts', [])
-print(accts[0]['config_dir'])
-")"
-PRIMARY_EMAIL="$(/opt/homebrew/bin/python3 -c "
-import json, sys
-a = json.load(open('$MAIL_TRIAGE_ACCOUNTS'))
-accts = a if isinstance(a, list) else a.get('accounts', [])
-print(accts[0]['email'])
-")"
-
-# Derive the gws config parent directory from the primary account config_dir.
-GWS_CONFIG_DIR="$(dirname "$PRIMARY_CONFIG")"
-
 {
-  echo "=== mail-triage run $TS ==="
-  claude -p "$(cat "$MAIL_TRIAGE_DIR/TRIAGE.md")" \
-    --model sonnet \
-    --permission-mode bypassPermissions \
-    --add-dir "$MAIL_TRIAGE_DIR" \
-    --add-dir "$GWS_CONFIG_DIR" \
-    || { echo "claude triage failed"; rc=1; }
-  echo "=== triage done $(date +%H:%M:%S) ==="
+  echo "=== zero run $TS ==="
 
   # --- Demote automated/no-reply mail out of ⚡ Action (deterministic guard) ---
   # The LLM triage occasionally promotes Google security alerts, billing notices,
@@ -95,10 +73,8 @@ for acct in accts:
     || { echo "missed_sweep failed"; rc=1; }
   echo "=== catch-up done $(date +%H:%M:%S) ==="
 
-  # Reply drafting now happens on demand inside the app (tap Reply on a loop),
-  # so the daily run no longer pre-generates drafts or posts to Slack. The Slack
-  # review flow still lives in slack_app/ and docs/PIPELINE.md for anyone who
-  # wants it, but it is not part of the default experience.
+  # Reply drafting happens on demand inside the app (tap Reply on a loop);
+  # the daily run does not pre-generate drafts.
   echo "=== done $(date +%H:%M:%S) ==="
 } >"$LOG" 2>&1
 

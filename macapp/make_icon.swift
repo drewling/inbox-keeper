@@ -1,9 +1,9 @@
 // make_icon.swift — draws the zero app icon natively (no external image
 // generation) and emits a full .iconset. build.sh runs `iconutil` on the output.
 //
-// The mark echoes the in-app wordmark: a glossy Google-blue squircle holding a cream
-// "checked tray" glyph — a tray (your inbox) with a checkmark resting in it
-// ("only what needs you, and nothing lost"). Deterministic + on-brand + in-repo.
+// The mark: a glossy Google-blue squircle holding a single bold cream checkmark
+// ("inbox at zero — done, nothing lost"). Mirrors the user's reference icon.
+// Deterministic + on-brand + in-repo.
 //
 //   swift make_icon.swift <output-iconset-dir>
 
@@ -55,30 +55,25 @@ func render(_ px: Int) -> NSBitmapImageRep {
     hi.draw(in: NSRect(x: tile.minX, y: tile.midY, width: tile.width, height: tile.height / 2), angle: -90)
     ctx.restoreGState()
 
-    // Glyph: a cream tray with a checkmark resting in it. (y-up coordinates.)
-    let cx = tile.midX, cy = tile.midY, w = tile.width
-    let stroke = w * 0.072
+    // Glyph: a single bold checkmark, centered, optically lifted a touch above
+    // dead-center so it reads as balanced. (y-up coordinates.)
+    let w = tile.width
+    let cx = tile.midX, cy = tile.midY + w * 0.012
+    let stroke = w * 0.115   // bold; stays legible down to 16px
 
-    // Tray (open top): left wall up → floor → right wall up.
-    let tray = NSBezierPath()
-    tray.move(to: NSPoint(x: cx - 0.30 * w, y: cy - 0.06 * w))
-    tray.line(to: NSPoint(x: cx - 0.30 * w, y: cy - 0.27 * w))
-    tray.line(to: NSPoint(x: cx + 0.30 * w, y: cy - 0.27 * w))
-    tray.line(to: NSPoint(x: cx + 0.30 * w, y: cy - 0.06 * w))
-    tray.lineWidth = stroke
-    tray.lineCapStyle = .round
-    tray.lineJoinStyle = .round
-    cream.setStroke(); tray.stroke()
-
-    // Checkmark resting in the tray.
     let check = NSBezierPath()
-    check.move(to: NSPoint(x: cx - 0.24 * w, y: cy + 0.07 * w))
-    check.line(to: NSPoint(x: cx - 0.06 * w, y: cy - 0.12 * w))
-    check.line(to: NSPoint(x: cx + 0.28 * w, y: cy + 0.26 * w))
-    check.lineWidth = stroke * 1.05
+    check.move(to: NSPoint(x: cx - 0.225 * w, y: cy - 0.02 * w))
+    check.line(to: NSPoint(x: cx - 0.055 * w, y: cy - 0.195 * w))
+    check.line(to: NSPoint(x: cx + 0.255 * w, y: cy + 0.20 * w))
+    check.lineWidth = stroke
     check.lineCapStyle = .round
     check.lineJoinStyle = .round
+    // Faint inner shadow on the glyph for a debossed, glassy feel.
+    ctx.saveGState()
+    ctx.setShadow(offset: CGSize(width: 0, height: -w * 0.006),
+                  blur: w * 0.012, color: srgb(0.04, 0.10, 0.22, 0.28).cgColor)
     cream.setStroke(); check.stroke()
+    ctx.restoreGState()
 
     NSGraphicsContext.restoreGraphicsState()
     return rep

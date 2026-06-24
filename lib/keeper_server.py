@@ -15,7 +15,7 @@ Stdlib only (no dependencies) so the open-source install stays trivial. Binds to
 Only one background job runs at a time (keeper operations touch Gmail and should
 not overlap). The panel polls /api/job while one is active.
 """
-import json, os, re, subprocess, sys, threading, time
+import json, os, re, signal, subprocess, sys, threading, time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
@@ -29,7 +29,7 @@ CATEGORIES_PATH = os.path.join(ROOT, "categories.json")
 SETTINGS_PATH = os.path.join(ROOT, "app", "settings.json")
 _DATE_RE = re.compile(r"^\d{4}/\d{2}/\d{2}$")
 PYTHON = sys.executable or "python3"
-CLAUDE = os.environ.get("CLAUDE_BIN", "claude")
+# ponytail: CLAUDE_BIN lookup moved to lib/llm.py; removed module-level constant
 
 # gws reads per-account credentials from its keyring/config dir; this app never uses
 # a pre-obtained global token. A stray GOOGLE_WORKSPACE_CLI_TOKEN in the environment
@@ -46,7 +46,19 @@ DEFAULT_CATEGORY_EMOJI = "🏷️"
 # --- single background job slot -------------------------------------------------
 _job_lock = threading.Lock()
 _job = {"id": 0, "kind": None, "state": "idle", "started": 0, "finished": 0,
-        "message": "", "error": None}
+        "message": "", "error": None, "auth_url": None}
+
+# --- non-blocking boot state ----------------------------------------------------
+# _building is True while the background boot rebuild is running so /api/state
+# can report it immediately instead of blocking the HTTP server. Guarded by _boot_lock.
+_boot_lock = threading.Lock()
+_building = False
+
+# --- auth subprocess tracking (for cancel support) ------------------------------
+_auth_lock = threading.Lock()
+_auth_proc = None        # Popen object of the live gws auth login process (or None)
+_auth_pgid = None        # process-group id of that process
+_cancel_requested = False
 
 
 def _gws_env():
@@ -130,6 +142,33 @@ def _bump_undo_point(slug, label, delta):
     _patch_state(_m)
 
 
+def _state_is_stale():
+    """Return True if state.json is missing, unparseable, or reports any failure.
+
+    Called on boot so a stale FAILED state (all accounts ok=False) is rebuilt
+    rather than served indefinitely. Never throws.
+    """
+    try:
+        if not os.path.isfile(STATE_PATH):
+            return True
+        with open(STATE_PATH) as f:
+            data = json.load(f)
+        accounts = data.get("accounts", [])
+        # Fresh install with no accounts yet: the empty state is correct, not a
+        # failure — don't force a blocking rebuild on every boot.
+        if not accounts:
+            return False
+        # Top-level ok=False means the last build itself failed.
+        if not data.get("ok", False):
+            return True
+        # Any account ok=False means at least one account is broken.
+        if any(not a.get("ok", True) for a in accounts):
+            return True
+        return False
+    except Exception:
+        return True  # unparseable = stale
+
+
 def _build_state_blocking():
     r = subprocess.run([PYTHON, os.path.join(HERE, "dashboard_state.py")],
                        env=_gws_env(), capture_output=True, text=True, timeout=180)
@@ -151,10 +190,14 @@ def _run_keeper(payload):
     # Grace = protect mail newer than N days. The user's persisted setting is the
     # source of truth (default 0 = review the whole inbox and trust the keep-bar);
     # a payload value overrides it. Everything is reversible via Undo.
-    grace = int(payload.get("grace_days", _read_settings()["grace_days"]))
+    settings = _read_settings()
+    grace = int(payload.get("grace_days", settings["grace_days"]))
     accts = _load_accounts()
     failures, set_aside, kept = [], 0, 0
     for i, acct in enumerate(accts, 1):
+        # Per-account enable toggle (default: enabled). Lets the UI add a toggle later.
+        if acct.get("enabled", True) is False:
+            continue
         cfg = acct["config_dir"]
         email = acct.get("email", acct.get("slug", cfg))
         _set_job_message(f"Reviewing {email} ({i}/{len(accts)})…")
@@ -176,8 +219,18 @@ def _run_keeper(payload):
     # Update what we've learned from recent actions (best-effort; gated on signals).
     subprocess.run([PYTHON, os.path.join(HERE, "learn.py")],
                    env=_gws_env(), capture_output=True, text=True, timeout=180)
-    _set_job_message(f"Set aside {set_aside}, {kept} still need you")
+    summary_msg = f"Set aside {set_aside}, {kept} still need you"
+    _set_job_message(summary_msg)
     _build_state_blocking()
+    # macOS notification (notify_on_run setting, default True).
+    if settings.get("notify_on_run", True):
+        try:
+            subprocess.run(
+                ["osascript", "-e",
+                 f'display notification "{summary_msg}" with title "zero"'],
+                capture_output=True, timeout=10)
+        except Exception:
+            pass
     if failures:
         raise RuntimeError("Some accounts failed: " + " | ".join(failures))
 
@@ -364,7 +417,7 @@ _GMAIL_SYSTEM_IDS = frozenset({
 })
 
 # Legacy unified-taxonomy labels created by earlier zero versions
-# (before per-user categories were introduced). Source: TRIAGE.md + demote_automated.py.
+# (before per-user categories were introduced); kept so cleanup can still find them.
 _LEGACY_LABELS = frozenset({
     "⚡ Action",
     "📬 FYI",
@@ -627,14 +680,12 @@ def _gen_draft(payload):
         + f"\nSubject: {subject}\nThread (oldest to newest):\n" + "\n".join(convo[-8:])
         + "\n\nOutput ONLY the reply body text, no preamble, no subject line."
     )
-    try:
-        r = subprocess.run([CLAUDE, "-p", prompt, "--model", "haiku"],
-                           capture_output=True, text=True, timeout=120)
-    except subprocess.TimeoutExpired:
-        raise RuntimeError("drafting timed out")
-    if r.returncode != 0:
-        raise RuntimeError("drafting failed")
-    body = r.stdout.strip()
+    sys.path.insert(0, HERE)
+    import llm as _llm  # noqa: E402
+    body_raw, ok = _llm.run_prompt(prompt, model="haiku", timeout=120)
+    if not ok:
+        raise RuntimeError("drafting timed out or failed")
+    body = body_raw.strip()
     if not body:
         raise RuntimeError("the draft came back empty; try Regenerate")
     if not to_email:
@@ -684,6 +735,41 @@ def _send_draft(payload):
     return {"ok": True, "sent": tid}
 
 
+def _kill_stray_auth():
+    """Best-effort: kill any gws auth login processes left from a previous attempt.
+    Uses 'pgrep -f' which is available on macOS. Defensive — never raises."""
+    try:
+        r = subprocess.run(["pgrep", "-f", "auth.login"],
+                           capture_output=True, text=True, timeout=5)
+        for pid_s in r.stdout.split():
+            try:
+                os.kill(int(pid_s), signal.SIGKILL)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _cancel_auth():
+    """Set the cancel flag and kill the auth process group if one is running.
+    Safe to call even when no auth is in progress."""
+    global _cancel_requested, _auth_proc, _auth_pgid
+    with _auth_lock:
+        _cancel_requested = True
+        pgid = _auth_pgid
+        proc = _auth_proc
+    if pgid is not None:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except Exception:
+            pass
+    if proc is not None:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
 def _add_account(payload):
     """Authenticate a new Gmail account via gws (opens the user's browser) and add
     it to accounts.json. The OAuth consent happens in the browser; we never see
@@ -710,20 +796,101 @@ def _add_account(payload):
                 return hit
         return None
     try:
+        global _cancel_requested, _auth_proc, _auth_pgid
+        # Kill any leftover gws auth login from a prior attempt so it can't interfere.
+        _kill_stray_auth()
+
         _seed = _existing_client_secret()
         if _seed:
             shutil.copyfile(_seed, os.path.join(pending, "client_secret.json"))
         env = _gws_env()
         env["GOOGLE_WORKSPACE_CLI_CONFIG_DIR"] = pending
-        _set_job_message("Opening your browser to sign in...")
-        r = subprocess.run(["gws", "auth", "login"], env=env,
-                           capture_output=True, text=True, timeout=300)
-        if r.returncode != 0:
-            raw = (r.stderr or r.stdout or "").strip()
-            # Detect the missing-OAuth-client failure before surfacing a truncated message.
+
+        # Reset cancel flag before launch.
+        with _auth_lock:
+            _cancel_requested = False
+
+        _set_job_message("Starting sign-in…")
+        # Launch in its own session (start_new_session=True) so we can killpg() the
+        # entire process group — the gws grandchild included — on timeout or cancel.
+        # stderr is merged into stdout so the consent URL + any error share one stream.
+        p = subprocess.Popen(["gws", "auth", "login"], env=env,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             text=True, bufsize=1, start_new_session=True)
+        pgid = os.getpgid(p.pid)
+        with _auth_lock:
+            _auth_proc = p
+            _auth_pgid = pgid
+
+        # gws has no TTY here, so instead of opening a browser it PRINTS the Google
+        # consent URL and waits for the localhost redirect. Read its output in a
+        # thread: when the URL appears, open it for the user (so the browser launches
+        # automatically) and publish it on the job as a fallback link they can click.
+        _out_buf = []
+        _opened = threading.Event()
+        def _pump():
+            try:
+                for line in p.stdout:
+                    _out_buf.append(line)
+                    if not _opened.is_set() and "accounts.google.com" in line and "http" in line:
+                        url = line[line.find("http"):].strip()
+                        _opened.set()
+                        _set_job_auth_url(url)
+                        _set_job_message("Opening your browser to sign in…")
+                        try:
+                            subprocess.run(["open", url], timeout=10)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+        _reader = threading.Thread(target=_pump, daemon=True)
+        _reader.start()
+
+        _AUTH_TIMEOUT = 180  # seconds
+        deadline = _time.time() + _AUTH_TIMEOUT
+        told_waiting = False
+        while True:
+            rc = p.poll()
+            if rc is not None:
+                break
+            with _auth_lock:
+                cancelled = _cancel_requested
+            if cancelled:
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except Exception:
+                    pass
+                raise RuntimeError("Sign-in cancelled.")
+            # Once the browser URL is out, nudge the status to "waiting on you".
+            if _opened.is_set() and not told_waiting and _time.time() - (deadline - _AUTH_TIMEOUT) > 4:
+                _set_job_message("Waiting for you to finish signing in…")
+                told_waiting = True
+            if _time.time() >= deadline:
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except Exception:
+                    pass
+                raise RuntimeError(
+                    "Sign-in timed out. The browser sign-in was not completed — "
+                    "try Add account again.")
+            _time.sleep(0.5)
+
+        _reader.join(timeout=2)
+        stdout_out = "".join(_out_buf)
+        stderr_out = ""
+        rc = p.returncode
+
+        if rc != 0:
+            stderr_text = (stderr_out or stdout_out or "").strip()
+            # Only show the long OAuth-setup wall of text when credentials are genuinely
+            # absent. If client_secret exists (or env vars set it), give a short message.
+            cred_status = _credentials_status()
             _cred_hints = ("client_id", "client_secret", "GOOGLE_WORKSPACE_CLI_CLIENT",
                            "client_secret.json", "Cloud Console")
-            if any(h.lower() in raw.lower() for h in _cred_hints) or not raw:
+            missing_creds = (not cred_status["has_client"]
+                             and (any(h.lower() in stderr_text.lower() for h in _cred_hints)
+                                  or not stderr_text))
+            if missing_creds:
                 gws_cfg_dir = os.path.join(os.path.expanduser("~"), ".config", "gws")
                 client_secret_path = os.path.join(gws_cfg_dir, "client_secret.json")
                 raise RuntimeError(
@@ -745,7 +912,12 @@ def _add_account(payload):
                     "GOOGLE_WORKSPACE_CLI_CLIENT_SECRET in your environment, "
                     "then restart the app and try again."
                 )
-            raise RuntimeError("sign-in didn't complete: " + raw[-400:])
+            # Credentials present but sign-in didn't complete — short message.
+            tail = (" (" + stderr_text[-200:] + ")") if stderr_text else ""
+            raise RuntimeError(
+                "Sign-in didn't complete. Make sure you finished signing in in your "
+                "browser, then try Add account again." + tail)
+
         prof = subprocess.run(["gws", "gmail", "users", "getProfile", "--params",
                                json.dumps({"userId": "me"})], env=env,
                               capture_output=True, text=True, timeout=60)
@@ -784,6 +956,11 @@ def _add_account(payload):
         _set_job_message("Adding account...")
         _build_state_blocking()
     finally:
+        # Always clear auth-proc tracking so cancel state is clean for next attempt.
+        with _auth_lock:
+            _auth_proc = None
+            _auth_pgid = None
+            _cancel_requested = False
         if not committed:
             shutil.rmtree(pending, ignore_errors=True)
             if created_dir:
@@ -855,7 +1032,7 @@ def _set_client_credentials(payload):
 
 
 sys.path.insert(0, HERE)
-from dashboard_state import _DEFAULT_CATEGORIES  # noqa: E402 — canonical definition lives there
+from dashboard_state import _DEFAULT_CATEGORIES, _DEFAULT_POLICY  # noqa: E402
 
 
 def _read_categories():
@@ -872,11 +1049,90 @@ def _read_categories():
     return _DEFAULT_CATEGORIES
 
 
-_DEFAULT_SETTINGS = {"grace_days": 0}
+_DEFAULT_SETTINGS = {
+    "grace_days": 0,
+    # Schedule
+    "schedule_hour": 7,        # 0-23
+    "schedule_minute": 0,      # 0-59
+    "schedule_days": [1, 2, 3, 4, 5],  # 0=Sun .. 6=Sat; Mon-Fri by default
+    # Notifications & automation
+    "notify_on_run": True,
+    "auto_draft": False,
+    # LLM provider (see lib/llm.py)
+    "provider": "claude",
+}
+
+
+_LAUNCHD_LABEL = "com.drewl.zero.daily"
+_PLIST_PATH = os.path.expanduser(f"~/Library/LaunchAgents/{_LAUNCHD_LABEL}.plist")
+
+
+def _rewrite_schedule_plist(settings):
+    """Rewrite ~/Library/LaunchAgents/com.drewl.zero.daily.plist from settings.
+
+    Only called when the plist already exists (we don't auto-install a schedule
+    the user never set up). Reloads via launchctl; errors are swallowed (non-fatal).
+    """
+    if not os.path.isfile(_PLIST_PATH):
+        return
+    hour = int(settings.get("schedule_hour", 7))
+    minute = int(settings.get("schedule_minute", 0))
+    days = settings.get("schedule_days", [1, 2, 3, 4, 5])
+    # Build <array> of <dict> entries for StartCalendarInterval (one per weekday).
+    # LaunchAgent weekday: 0=Sun..6=Sat (same as our settings convention).
+    if days:
+        interval_entries = "\n".join(
+            f"    <dict>"
+            f"<key>Weekday</key><integer>{d}</integer>"
+            f"<key>Hour</key><integer>{hour}</integer>"
+            f"<key>Minute</key><integer>{minute}</integer>"
+            f"</dict>"
+            for d in days
+        )
+        start_interval = f"  <key>StartCalendarInterval</key>\n  <array>\n{interval_entries}\n  </array>"
+    else:
+        # No days selected → daily at the specified time (omit Weekday).
+        start_interval = (
+            f"  <key>StartCalendarInterval</key>\n"
+            f"  <dict><key>Hour</key><integer>{hour}</integer>"
+            f"<key>Minute</key><integer>{minute}</integer></dict>"
+        )
+
+    # Find the zero binary from this script's own location.
+    zero_bin = os.path.join(ROOT, "bin", "zero")
+    plist_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{_LAUNCHD_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{zero_bin}</string>
+    <string>run</string>
+  </array>
+{start_interval}
+  <key>EnvironmentVariables</key>
+  <dict><key>GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND</key><string>file</string></dict>
+  <key>StandardOutPath</key><string>{os.path.join(ROOT, 'logs', 'daily.out.log')}</string>
+  <key>StandardErrorPath</key><string>{os.path.join(ROOT, 'logs', 'daily.err.log')}</string>
+</dict>
+</plist>
+"""
+    try:
+        tmp = _PLIST_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(plist_xml)
+        os.replace(tmp, _PLIST_PATH)
+        subprocess.run(["launchctl", "unload", _PLIST_PATH],
+                       capture_output=True, timeout=10)
+        subprocess.run(["launchctl", "load", "-w", _PLIST_PATH],
+                       capture_output=True, timeout=10)
+    except Exception:
+        pass  # plist reload failure is non-fatal
 
 
 def _read_settings():
-    """User timing settings (grace_days). Defaults if file is missing/unreadable."""
+    """User timing settings. Defaults if file is missing/unreadable."""
     s = dict(_DEFAULT_SETTINGS)
     try:
         if os.path.isfile(SETTINGS_PATH):
@@ -888,8 +1144,9 @@ def _read_settings():
 
 
 def _write_settings(settings):
-    """Persist the whitelisted settings keys. Returns the saved dict."""
-    s = dict(_DEFAULT_SETTINGS)
+    """Persist the whitelisted settings keys. Merges over the current file so a
+    partial PUT (e.g. only grace_days) doesn't reset other keys to defaults."""
+    s = _read_settings()   # start from current persisted values (already merged with defaults)
     s.update({k: v for k, v in (settings or {}).items() if k in _DEFAULT_SETTINGS})
     os.makedirs(os.path.dirname(SETTINGS_PATH), exist_ok=True)
     tmp = SETTINGS_PATH + ".tmp"
@@ -909,13 +1166,18 @@ def _set_job_message(msg):
         _job["message"] = msg
 
 
+def _set_job_auth_url(url):
+    with _job_lock:
+        _job["auth_url"] = url
+
+
 def _start_job(kind, payload):
     with _job_lock:
         if _job["state"] == "running":
             return None
         _job.update(id=_job["id"] + 1, kind=kind, state="running",
                     started=int(time.time()), finished=0, message="Starting...",
-                    error=None)
+                    error=None, auth_url=None)
         jid = _job["id"]
 
     def worker():
@@ -985,26 +1247,45 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 return self._send(500, {"error": str(exc)})
         if p == "/api/state":
+            with _boot_lock:
+                building = _building
             if os.path.isfile(STATE_PATH):
+                # Inject "building" into the cached state so the app knows a rebuild
+                # is in progress without re-reading the full state file into Python.
                 with open(STATE_PATH, "rb") as f:
-                    return self._send(200, f.read(), "application/json")
+                    raw = f.read()
+                if building:
+                    try:
+                        st = json.loads(raw)
+                        st["building"] = True
+                        return self._send(200, st)
+                    except Exception:
+                        pass  # malformed state.json; fall through to raw bytes
+                return self._send(200, raw, "application/json")
+            # No state.json yet: return the needs_build sentinel + building flag.
             return self._send(200, {"ok": False, "accounts": [], "total_loops": 0,
-                                    "needs_build": True})
+                                    "needs_build": True, "building": building})
         if p == "/api/job":
             with _job_lock:
                 return self._send(200, dict(_job))
         if p == "/api/policy":
-            text = ""
-            if os.path.isfile(POLICY_PATH):
-                with open(POLICY_PATH) as f:
-                    text = f.read()
-            return self._send(200, {"policy": text})
+            try:
+                text = open(POLICY_PATH).read() if os.path.isfile(POLICY_PATH) else ""
+            except Exception:
+                text = ""
+            return self._send(200, {"policy": text if text.strip() else _DEFAULT_POLICY})
         if p == "/api/categories":
             return self._send(200, {"categories": _read_categories()})
         if p == "/api/settings":
             return self._send(200, _read_settings())
         if p == "/api/credentials-status":
             return self._send(200, _credentials_status())
+        if p == "/api/provider-status":
+            sys.path.insert(0, HERE)
+            import llm as _llm  # noqa: E402
+            providers = _llm.detect_providers()
+            active = next((pr["name"] for pr in providers if pr["active"]), "claude")
+            return self._send(200, {"providers": providers, "active": active})
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -1012,6 +1293,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, {"error": "cross-site request blocked"})
         p = urlparse(self.path).path
         payload = self._body_json()
+
+        if p == "/api/job/cancel":
+            # Idempotent: always returns ok. Sets the cancel flag and kills any live
+            # auth process group so _add_account() unblocks without waiting for TIMEOUT.
+            _cancel_auth()
+            return self._send(200, {"ok": True})
+
         # Reject a learned preference: remove from learned.md + add to reject store.
         if p == "/api/learned/reject":
             text = payload.get("text", "").strip()
@@ -1134,11 +1422,77 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"ok": True})
 
         if p == "/api/settings":
+            errors = []
+            validated = {}
+            # grace_days: required if present
             g = payload.get("grace_days")
-            if not isinstance(g, int) or isinstance(g, bool) or not (0 <= g <= 90):
-                return self._send(400, {"error": "grace_days must be an int 0–90"})
+            if g is not None:
+                if not isinstance(g, int) or isinstance(g, bool) or not (0 <= g <= 90):
+                    errors.append("grace_days must be an int 0–90")
+                else:
+                    validated["grace_days"] = g
+            # schedule_hour
+            sh = payload.get("schedule_hour")
+            if sh is not None:
+                if not isinstance(sh, int) or isinstance(sh, bool) or not (0 <= sh <= 23):
+                    errors.append("schedule_hour must be an int 0–23")
+                else:
+                    validated["schedule_hour"] = sh
+            # schedule_minute
+            sm = payload.get("schedule_minute")
+            if sm is not None:
+                if not isinstance(sm, int) or isinstance(sm, bool) or not (0 <= sm <= 59):
+                    errors.append("schedule_minute must be an int 0–59")
+                else:
+                    validated["schedule_minute"] = sm
+            # schedule_days: list of ints 0-6
+            sd = payload.get("schedule_days")
+            if sd is not None:
+                if (not isinstance(sd, list)
+                        or not all(isinstance(d, int) and not isinstance(d, bool) and 0 <= d <= 6
+                                   for d in sd)):
+                    errors.append("schedule_days must be a list of ints 0–6")
+                else:
+                    validated["schedule_days"] = sd
+            # notify_on_run
+            nr = payload.get("notify_on_run")
+            if nr is not None:
+                if not isinstance(nr, bool):
+                    errors.append("notify_on_run must be a bool")
+                else:
+                    validated["notify_on_run"] = nr
+            # auto_draft
+            ad = payload.get("auto_draft")
+            if ad is not None:
+                if not isinstance(ad, bool):
+                    errors.append("auto_draft must be a bool")
+                else:
+                    validated["auto_draft"] = ad
+            # provider: must be a known provider name AND currently available
+            prov = payload.get("provider")
+            if prov is not None:
+                sys.path.insert(0, HERE)
+                import llm as _llm  # noqa: E402
+                known = {pr["name"] for pr in _llm.KNOWN_PROVIDERS}
+                if prov not in known:
+                    errors.append(f"provider must be one of: {', '.join(sorted(known))}")
+                else:
+                    statuses = _llm.detect_providers()
+                    prov_status = next((s for s in statuses if s["name"] == prov), None)
+                    if not prov_status or not prov_status["available"]:
+                        errors.append(f"provider '{prov}' is not available on this system")
+                    else:
+                        validated["provider"] = prov
+            if errors:
+                return self._send(400, {"error": "; ".join(errors)})
+            if not validated:
+                return self._send(400, {"error": "no valid settings keys provided"})
             try:
-                return self._send(200, _write_settings({"grace_days": g}))
+                saved = _write_settings(validated)
+                # Reload the launchd schedule if any schedule key changed.
+                if any(k in validated for k in ("schedule_hour", "schedule_minute", "schedule_days")):
+                    _rewrite_schedule_plist(saved)
+                return self._send(200, saved)
             except Exception as exc:
                 return self._send(500, {"error": str(exc)})
 
@@ -1146,22 +1500,36 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    global _building
     # gws needs the file keyring backend to work headlessly; ensure it's set even
     # when the server is started directly (the CLI / app set it, but be safe).
     os.environ.setdefault("GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND", "file")
     host = os.environ.get("KEEPER_HOST", "127.0.0.1")
     port = int(os.environ.get("KEEPER_PORT", "8765"))
-    # Build state on boot if missing, so the first panel open is never empty.
-    if not os.path.isfile(STATE_PATH):
-        try:
-            _build_state_blocking()
-        except Exception as exc:
-            # Don't crash the server, but don't hide it either — the panel shows
-            # a skeleton until /api/refresh succeeds; make the cause visible in logs.
-            print(f"warning: initial state build failed: {exc}", file=sys.stderr)
+
+    # Start the HTTP server FIRST so /api/state is reachable immediately (returns
+    # building:true while the rebuild runs), then kick off the rebuild in the background.
+    # ponytail: blocking boot was the root cause of up-to-180s unreachability on stale state.
     httpd = ThreadingHTTPServer((host, port), Handler)
     print(f"zero API on http://{host}:{port}")
     sys.stdout.flush()
+
+    if _state_is_stale():
+        def _boot_rebuild():
+            global _building
+            with _boot_lock:
+                _building = True
+            try:
+                _build_state_blocking()
+            except Exception as exc:
+                # Never crash the server — the panel can /api/refresh manually.
+                print(f"warning: initial state build failed: {exc}", file=sys.stderr)
+            finally:
+                with _boot_lock:
+                    _building = False
+        t = threading.Thread(target=_boot_rebuild, daemon=True, name="boot-rebuild")
+        t.start()
+
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

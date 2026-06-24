@@ -1,169 +1,104 @@
 # Architecture
 
-> **Legacy.** Describes the original Slack-based triage runtime. The current product
-> is the zero menu-bar app (Swift shell + local `lib/keeper_server.py` + web
-> panel); see the README and PRODUCT.md. This document covers the opt-in Slack pipeline.
+How zero is put together: a native macOS menu-bar app over a small local HTTP
+service that drives Gmail through your own credentials. Everything runs on your
+Mac. Nothing is deleted, and no mail is sent without you.
 
-## Overview
+## The three pieces
 
-mail-triage is a personal automation that runs on macOS. It uses three runtimes:
-1. A shell script (`run.sh`) orchestrated by launchd
-2. Headless Claude (Sonnet as orchestrator, Haiku as subagents)
-3. A long-running Slack Bolt Python app in Socket Mode
-
----
-
-## Component diagram
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  macOS launchd (~/Library/LaunchAgents/)                         │
-│                                                                   │
-│  ┌─────────────────────┐    ┌─────────────────────────────────┐  │
-│  │ com.drewl.mailtriage│    │ com.drewl.maildraftreview       │  │
-│  │ Daily @ 07:00       │    │ KeepAlive (always-on)           │  │
-│  │ → run.sh            │    │ → slack_app/daemon.sh           │  │
-│  └──────────┬──────────┘    └──────────────┬────────────────── ┘  │
-└─────────────┼─────────────────────────────┼────────────────────── ┘
-              │                             │
-              ▼                             ▼
-┌─────────────────────────┐    ┌────────────────────────────────┐
-│         run.sh          │    │    slack_app/app.py             │
-│  (morning pipeline)     │    │    (Slack Bolt Socket Mode)     │
-│                         │    │                                 │
-│  1. claude (Sonnet)     │    │  Listens for button clicks:     │
-│     → TRIAGE.md prompt  │    │  • Send draft                   │
-│     → fans out Haiku    │    │  • Edit draft (modal)           │
-│       subagents per     │    │  • Discard draft                │
-│       account           │    │  • Regenerate draft             │
-│                         │    │  • Snooze card                  │
-│  2. missed_sweep.py     │    │  • Draft reply for missed item  │
-│     → catchup.py ×N     │    │  • Archive missed item          │
-│       (parallel)        │    │                                 │
-│                         │    │  Reads:  queue.json             │
-│  3. gen_drafts.py       │    │          snoozes.json           │
-│     (primary account)   │    │  Writes: queue.json (status)   │
-│                         │    └────────────────────────────────┘
-│  4. build_briefing.py   │
-│                         │
-│  5. app.py brief        │
-│     app.py post         │
-│     app.py post-missed  │
-└────────────┬────────────┘
-             │
-             ▼
-     ┌───────────────┐
-     │  Gmail (gws)  │
-     │               │
-     │  • list labels│
-     │  • list msgs  │
-     │  • modify     │
-     │  • create     │
-     │    drafts     │
-     │  • send email │
-     └───────────────┘
-```
-
----
-
-## Data flow
-
-### 1. Morning triage (claude + Haiku subagents)
+1. **The app** (`macapp/`) — a SwiftUI menu-bar app (`LSUIElement`) hosted in a
+   custom `NSPanel` with the macOS 26 Liquid Glass surface. It is the only
+   front end. It owns no mail logic; it talks to the local service over HTTP.
+2. **The service** (`lib/keeper_server.py`) — a stdlib-only JSON API bound to
+   `127.0.0.1:8765`. The app spawns it (detached, so it survives panel
+   open/close) and re-attaches on next launch. It reads cached state, runs the
+   keeper, generates drafts, and reads/writes settings.
+3. **The tools** — `gws` (the Google Workspace CLI) for all Gmail access, one
+   OAuth config dir per account; and an LLM provider (the `claude` CLI today)
+   for the judgement calls, behind `lib/llm.py`.
 
 ```
-run.sh
-  → claude -p TRIAGE.md (Sonnet orchestrator)
-      → Task(haiku) for each account in parallel:
-          → ensure_labels.sh <config_dir>      # idempotent label creation
-          → fetch_inbox.sh <config_dir>         # last 1d unread, compact JSON
-          → classify each thread (Haiku)
-          → apply.sh <config_dir> <thread_id>  # add/remove label ids
-      → compile JSON from all workers
-      → gws gmail +send (digest email to primary account)
+┌──────────────────────────────┐     HTTP 127.0.0.1:8765
+│  zero.app (Swift / SwiftUI)  │ ───────────────┐
+│  menu-bar panel, Liquid Glass│                │
+└──────────────────────────────┘                ▼
+                                   ┌──────────────────────────────┐
+                                   │   lib/keeper_server.py        │
+                                   │   local JSON API (detached)   │
+                                   │   /api/state /run /draft …    │
+                                   └───────┬───────────────┬───────┘
+                                           │               │
+                                  lib/llm.py          gws (per account)
+                                  run_prompt()        Gmail API, keyring
+                                  (claude CLI)        file backend
+                                           │               │
+                                           ▼               ▼
+                                    keep / archive    list · modify ·
+                                    judgement         create draft · send
 ```
 
-### 2. Missed-items sweep
+## Request flow
 
-```
-run.sh
-  → missed_sweep.py 14
-      → catchup.py <config_dir> in parallel (one per account):
-          → query inbox: older_than:1d newer_than:14d, no Action label
-          → filter: last msg not from user, user never replied
-          → Haiku: keep only genuinely important items
-          → returns JSON list
-      → aggregate all results → drafts/missed_today.json
-      → send "⏰ You may have missed" digest email
-```
+- **State** — `GET /api/state` returns the cached `app/state.json` (open loops
+  per account, counts, last run). On boot the service rebuilds state if the
+  cache is missing or stale (any account failed), so a transient error never
+  sticks. `lib/dashboard_state.py` writes the cache.
+- **A run** — `POST /api/run` kicks a background job. For each enabled account
+  it calls `lib/review_open_loops.py`, which reads each inbox thread and asks
+  the LLM (via `run_prompt`) to judge it against your Rules: keep only what
+  still needs you, archive the rest reversibly. `lib/learn.py` rolls your edits
+  into a voice profile. Progress is polled via `GET /api/job`.
+- **A reply** — `POST /api/draft` builds a draft in your voice. `lib/context.py`
+  gathers the thread and sender history; `run_prompt` writes the reply;
+  `lib/draftutil.py` builds the MIME message, appends your Gmail signature
+  (`sendAs`), and creates the Gmail draft. `POST /api/draft/send` sends it.
+  Nothing sends without you pressing send.
+- **Configuration** — `GET/PUT /api/policy` (your Rules), `/api/categories`
+  (labels), `/api/settings` (grace window, schedule, provider, notifications),
+  `/api/provider-status` (which agent SDK is connected), and
+  `/api/credentials-status` + `/api/set-credentials` (in-app Google OAuth setup).
 
-### 3. Draft generation
+## The optional daily routine
 
-```
-run.sh
-  → gen_drafts.py <primary config_dir> <email> 1d
-      → for each ⚡ Action thread (last 1d):
-          → context.py: gather thread + sender history + drewl profile
-          → Haiku: judge_and_draft → {needs_reply, reason, reply}
-          → if needs_reply:
-              → draftutil.py create → Gmail draft id
-              → append to drafts/queue.json (status=pending)
-```
+`run.sh` is a launchd job you opt into from Settings (or `bin/zero schedule`).
+It runs the same keeper across accounts on your schedule (hour, minutes, and
+weekdays are configurable; the plist is regenerated when you change them), then
+refreshes state and, if enabled, posts a macOS notification with the result.
 
-### 4. Slack posting
+## Reversibility and privacy
 
-```
-run.sh
-  → app.py brief        → post morning briefing card (from briefing.json)
-  → app.py post         → post each pending unposted draft card
-  → app.py post-missed  → post each missed-item card
-
-User interaction (always-on daemon):
-  Button click → handle_* action handler
-    → subprocess: send_draft.sh / discard_draft.sh / update_and_send_draft.sh
-    → draftutil.py (send/discard/update-send)
-    → queue.json updated (status = sent/discarded/snoozed)
-    → Slack card updated (chat.update)
-```
-
----
+- **Nothing is ever deleted.** Archiving removes the `INBOX` label and adds a
+  dated `zero/undo` recovery label. Mail stays in All Mail; the Undo view
+  restores it with one search. There is no delete path in the code.
+- **Your keys, your machine.** zero signs in with your own Google OAuth client
+  and your own Claude credentials. There is no server in the middle and no
+  account to create. gws tokens live in the system keyring (file backend) under
+  `~/.config/gws/`, never in this repo.
 
 ## Key files
 
 | File | Purpose |
 |------|---------|
-| `config.sh` | Shell config: MAIL_TRIAGE_DIR, MAIL_TRIAGE_PYTHON, derived paths |
-| `config.py` | Python config: ROOT, LIB_DIR, QUEUE_PATH, etc. |
-| `accounts.json` | Account registry: slug, email, gws config_dir per account |
-| `TRIAGE.md` | Claude orchestrator prompt (triage rules and instructions) |
-| `knowledge/drewl.md` | AI context: who you are, signal-vs-noise boundaries |
-| `drafts/queue.json` | Pending/sent/discarded draft queue (gitignored) |
-| `drafts/briefing.json` | Morning briefing data (gitignored) |
-| `drafts/missed_today.json` | Missed items for current run (gitignored) |
-| `slack_app/snoozes.json` | Active snooze records (gitignored) |
-| `slack_app/config.env` | Slack tokens (gitignored — never commit) |
-
----
+| `macapp/Sources/` | The SwiftUI app (panel, model, API client, styles, onboarding) |
+| `lib/keeper_server.py` | Local JSON API the app talks to |
+| `lib/llm.py` | Provider abstraction: `detect_providers()`, `run_prompt()` |
+| `lib/review_open_loops.py` | Core keep/archive classifier (one LLM judgement per thread) |
+| `lib/dashboard_state.py` | Builds `app/state.json` (the cached inbox view) |
+| `lib/draftutil.py` | MIME build, Gmail signature, draft create/send |
+| `lib/context.py` | Thread + sender history for drafting |
+| `lib/learn.py` | Voice learning from your edits |
+| `run.sh` | Optional daily launchd pipeline |
+| `bin/zero` | CLI: run, state, schedule, stop |
+| `app/state.json` · `app/settings.json` | Runtime cache and settings (gitignored) |
+| `accounts.json` | Per-account registry: slug, email, gws config_dir (gitignored) |
+| `keep-policy.md` | The default Rules shown on first run |
 
 ## Config contract
 
 | Env var | Default | Purpose |
 |---------|---------|---------|
-| `MAIL_TRIAGE_DIR` | directory of config.sh / config.py | Override the repo root |
-| `MAIL_TRIAGE_PYTHON` | `python3` from PATH (shell) / `sys.executable` (Python) | Override the Python binary |
-| `QUEUE_PATH` | `$MAIL_TRIAGE_DIR/drafts/queue.json` | Override the queue file path |
-| `BRIEFING_PATH` | `$MAIL_TRIAGE_DIR/drafts/briefing.json` | Override the briefing file path |
+| `MAIL_TRIAGE_DIR` | directory of `config.sh` / `config.py` | Override the app root |
+| `MAIL_TRIAGE_PYTHON` | `python3` (shell) / `sys.executable` (Python) | Override the Python binary |
 | `CLAUDE_BIN` | `claude` | Override the Claude CLI binary |
 | `GWS_BIN` | `gws` | Override the gws binary |
-
----
-
-## Security model
-
-- **Nothing is ever deleted.** Archiving = remove INBOX label + add recovery label.
-  Undo via `undo_inbox_zero.py`.
-- **No email is sent without human action.** Drafts are created in Gmail but only
-  sent when you click "Send" in Slack.
-- **Tokens never leave the machine.** Slack tokens are in `config.env` (gitignored).
-  gws OAuth tokens are in `~/.config/gws/` (not in this repo).
-- **Socket Mode.** The Slack app uses Socket Mode — no public endpoint, no webhook
-  URL, no firewall rules needed.
+| `GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND` | `file` | gws keyring backend (set by the app) |

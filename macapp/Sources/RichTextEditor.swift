@@ -21,11 +21,16 @@ final class RichTextController: ObservableObject {
     }
 
     /// Seed the editor from a freshly generated plain-text draft.
+    /// ponytail: disableUndoRegistration keeps the seeded text off the undo stack so
+    /// Cmd-Z doesn't nuke the whole draft; user's own edits remain fully undoable.
     func setPlainText(_ s: String) {
         guard let tv = textView else { return }
+        tv.undoManager?.disableUndoRegistration()
         tv.textStorage?.setAttributedString(NSAttributedString(string: s, attributes: defaultAttrs))
+        tv.undoManager?.enableUndoRegistration()
         tv.typingAttributes = defaultAttrs
         tv.setSelectedRange(NSRange(location: (s as NSString).length, length: 0))
+        tv.breakUndoCoalescing()
     }
 
     func toggleBold() { toggleTrait(.boldFontMask) }
@@ -42,6 +47,7 @@ final class RichTextController: ObservableObject {
             tv.typingAttributes[.font] = f
             return
         }
+        guard tv.shouldChangeText(in: sel, replacementString: nil) else { return }
         let firstFont = (ts.attribute(.font, at: sel.location, effectiveRange: nil) as? NSFont) ?? InkNS.font
         let has = fm.traits(of: firstFont).contains(trait)
         ts.beginEditing()
@@ -59,6 +65,7 @@ final class RichTextController: ObservableObject {
         guard let tv = textView, let ts = tv.textStorage, ts.length > 0 else { return }
         let loc = min(tv.selectedRange().location, ts.length - 1)
         let pr = (ts.string as NSString).paragraphRange(for: NSRange(location: loc, length: max(tv.selectedRange().length, 0)))
+        guard tv.shouldChangeText(in: pr, replacementString: nil) else { return }
         let base = ts.attribute(.paragraphStyle, at: pr.location, effectiveRange: nil) as? NSParagraphStyle
         let style = (base?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
         if style.textLists.isEmpty {
@@ -67,7 +74,9 @@ final class RichTextController: ObservableObject {
         } else {
             style.textLists = []; style.headIndent = 0; style.firstLineHeadIndent = 0
         }
+        ts.beginEditing()
         ts.addAttribute(.paragraphStyle, value: style, range: pr)
+        ts.endEditing()
         tv.didChangeText()
     }
 
@@ -87,9 +96,12 @@ final class RichTextController: ObservableObject {
         var s = field.stringValue.trimmingCharacters(in: .whitespaces)
         guard !s.isEmpty else { return }
         if !(s.hasPrefix("http://") || s.hasPrefix("https://") || s.hasPrefix("mailto:")) { s = "https://" + s }
+        guard tv.shouldChangeText(in: sel, replacementString: nil) else { return }
+        ts.beginEditing()
         ts.addAttribute(.link, value: s, range: sel)
         ts.addAttribute(.foregroundColor, value: InkNS.accent, range: sel)
         ts.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: sel)
+        ts.endEditing()
         tv.didChangeText()
     }
 
@@ -109,7 +121,15 @@ final class RichTextController: ObservableObject {
 
 struct RichTextEditor: NSViewRepresentable {
     @ObservedObject var controller: RichTextController
-    var initialText: String = ""
+    /// The current draft text from the model. Changes here trigger a undo-clean re-seed
+    /// (e.g. after Regenerate), while user edits in-between remain on the undo stack.
+    var seedText: String = ""
+
+    final class Coordinator {
+        var lastSeed = ""
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSTextView.scrollableTextView()
@@ -132,9 +152,19 @@ struct RichTextEditor: NSViewRepresentable {
             .cursor: NSCursor.pointingHand,
         ]
         controller.textView = tv     // plain weak ref; not @Published, so no update-cycle warning
-        if !initialText.isEmpty { controller.setPlainText(initialText) }   // seed the generated draft
+        if !seedText.isEmpty { controller.setPlainText(seedText) }   // seed the generated draft
+        context.coordinator.lastSeed = seedText
         return scroll
     }
 
-    func updateNSView(_ nsView: NSScrollView, context: Context) {}
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        // ponytail: re-seed only when seedText itself changes (tracked via Coordinator).
+        // User edits and unrelated re-renders (steer TextField, hover, animation) never
+        // trigger a re-seed. Regenerate pushes a new seedText → coordinator mismatch →
+        // re-seed. setPlainText is undo-clean so the new draft starts a fresh undo stack.
+        if seedText != context.coordinator.lastSeed {
+            context.coordinator.lastSeed = seedText
+            if !seedText.isEmpty { controller.setPlainText(seedText) }
+        }
+    }
 }

@@ -11,7 +11,7 @@ Outputs JSON: {"missed": [{"from","subject","date","thread_id","why","age_days"}
 
 Usage: catchup.py <config_dir> [account_label] [lookback_days]
 """
-import json, os, sys, subprocess
+import json, os, sys
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime, parseaddr
 
@@ -20,7 +20,7 @@ sys.path.insert(0, HERE)
 import draftutil as du  # noqa: E402
 import context as ctx  # noqa: E402
 
-CLAUDE = os.environ.get("CLAUDE_BIN", "claude")
+import llm as _llm  # noqa: E402
 
 
 def _hdr(msg, name):
@@ -104,14 +104,10 @@ EMAILS:
 Output ONLY a JSON array of objects for the important ones:
 [{{"index": <number>, "why": "<short reason it matters>"}}]
 If none are important, output []."""
-    try:
-        r = subprocess.run([CLAUDE, "-p", prompt, "--model", "haiku"],
-                           capture_output=True, text=True, timeout=120)
-    except subprocess.TimeoutExpired:
-        return None  # classification timed out
-    if r.returncode != 0:
-        return None  # claude subprocess failed
-    txt = r.stdout.strip()
+    txt_raw, ok = _llm.run_prompt(prompt, model="haiku", timeout=120)
+    if not ok:
+        return None  # classification timed out or failed
+    txt = txt_raw.strip()
     start, end = txt.find("["), txt.rfind("]")
     if start < 0 or end < 0:
         return None  # unparseable output
@@ -139,7 +135,7 @@ def main():
     except Exception:
         profile_email = account_label
     cands = candidates(config_dir, profile_email, lookback)
-    missed = filter_important(cands, ctx.drewl_profile())
+    missed = filter_important(cands, ctx.user_profile())
     if missed is None:
         # Classification failed — surface as an error so the caller can distinguish
         # "nothing important" from "could not evaluate".

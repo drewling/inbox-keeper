@@ -1,16 +1,6 @@
-# Detailed Setup Guide
+# Setup Guide
 
-> **Legacy.** This covers the original Slack-based triage pipeline. For the current
-> product (the zero menu-bar app) use the README: `./install.sh`, then
-> `./bin/zero app`. Keep reading only if you want the opt-in Slack/draft flow.
-
-This guide walks through setting up mail-triage from scratch on a new macOS machine.
-
-## Prerequisites
-
-- macOS (tested on macOS 14+)
-- Homebrew: https://brew.sh
-- A Slack workspace where you can create an app
+Step-by-step first-time setup on a fresh Mac.
 
 ---
 
@@ -20,59 +10,64 @@ This guide walks through setting up mail-triage from scratch on a new macOS mach
 # Node.js (needed for gws and claude CLI)
 brew install node
 
-# Google Workspace CLI (gws)
-npm install -g @google-workspace/cli
-# Verify:
+# Google Workspace CLI (gws) — the official Google CLI
+npm install -g @googleworkspace/cli
 gws --version
 
 # Claude Code CLI
 npm install -g @anthropic-ai/claude-code
-# Verify:
-claude --version
+claude    # completes login on first run
 
-# Python 3 (usually already on macOS via Homebrew)
+# Python 3
 brew install python3
 
-# Optional but useful for debugging
+# Optional: useful for debugging log JSON
 brew install jq
 ```
 
 ---
 
-## 2. Clone the repo
+## 2. Clone and run setup
 
 ```bash
 git clone https://github.com/drewling/zero.git ~/zero
 cd ~/zero
-```
-
-The repo root is the only path that matters. Everything else is relative.
-
----
-
-## 3. Run setup.sh
-
-```bash
 bash setup.sh
 ```
 
-This will:
-- Check that all dependencies are installed
-- Create `slack_app/venv/` with Python dependencies
-- Copy `slack_app/config.env.example` → `slack_app/config.env`
-- Create `logs/` and `drafts/` directories
+`setup.sh` checks that all dependencies are present and creates `logs/` and `drafts/`.
 
 ---
 
-## 4. Configure your Gmail accounts
+## 3. Create a Google Cloud OAuth client
+
+zero uses your own OAuth credentials — no shared app, no third-party access.
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com/)
+2. Select (or create) a project.
+3. **APIs & Services → Enable APIs** → search for **Gmail API** → Enable it.
+4. **APIs & Services → Credentials → Create Credentials → OAuth client ID**
+   - Application type: **Desktop app**
+   - Name: anything (e.g. "zero")
+5. Download the JSON — this is your `client_secret.json`.
+
+When you launch zero for the first time, the onboarding screen prompts you to paste this JSON. It stays on your Mac; it is never transmitted anywhere.
+
+---
+
+## 4. Configure accounts.json
+
+```bash
+cp accounts.json.example accounts.json
+```
 
 Edit `accounts.json`:
 
 ```json
 [
   {
-    "slug":       "my-work",
-    "email":      "me@mycompany.com",
+    "slug":       "work",
+    "email":      "me@company.com",
     "config_dir": "~/.config/gws"
   },
   {
@@ -83,22 +78,18 @@ Edit `accounts.json`:
 ]
 ```
 
-- `slug` — short identifier (used in logs, no spaces)
+- `slug` — short identifier (used in logs; no spaces)
 - `email` — the Gmail address for this account
 - `config_dir` — where `gws` stores OAuth tokens for this account
 
-The **first entry is the primary account** — triage digests and missed-item emails
-are sent from and to this address.
+The **first entry is the primary account**.
 
-> **Using the app?** You can skip the CLI steps below. On first launch, zero's
-> onboarding lets you paste your Google OAuth client (`client_secret.json`) directly,
-> then runs the browser sign-in for you. Create the client at
-> [Google Cloud Console](https://console.cloud.google.com/apis/credentials) →
-> *Create credentials → OAuth client ID → Desktop app*, enable the Gmail API, and
-> paste the downloaded JSON into the onboarding screen. The steps below are the
-> manual/CLI equivalent.
+---
 
-### Authenticate each account with gws
+## 5. Authenticate each account with gws
+
+The `GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file` env var is required — without it gws
+tries to use the system keychain and may fail in headless or launchd contexts.
 
 For the primary account:
 ```bash
@@ -115,7 +106,7 @@ GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/accounts/personal \
   gws auth login --scope gmail
 ```
 
-Verify each account is authenticated:
+Verify each account:
 ```bash
 GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws \
   GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file \
@@ -124,107 +115,61 @@ GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws \
 
 ---
 
-## 5. Tune the knowledge file
+## 6. Launch the app
 
-`knowledge/drewl.md` tells the AI who you are, what your business does, and what
-counts as genuine mail vs noise. **Edit this file** with your name, role, and
-signal-vs-noise boundaries before running triage.
+```bash
+./bin/zero app
+```
 
-You can also edit `TRIAGE.md` to adjust classification rules.
+On first launch, zero's onboarding walks you through pasting your OAuth client JSON
+and connecting each Gmail account.
 
 ---
 
-## 6. Set up the Slack app
+## 7. Optional: tune the knowledge file
 
-### Create the Slack app
-
-1. Go to https://api.slack.com/apps → Create New App → From a manifest
-2. Use the manifest in `slack_app/manifest.yml` (paste it in YAML mode)
-3. Install the app to your workspace
-
-### Get the tokens
-
-- **Bot Token** (`xoxb-...`): Settings → OAuth & Permissions → Bot User OAuth Token
-- **App-Level Token** (`xapp-...`): Settings → Basic Information → App-Level Tokens → Generate (scope: `connections:write`)
-
-### Set the target channel
-
-Either a channel ID (starts with `C`) or your user ID (starts with `U`) for DMs.
-To get your user ID: in Slack, click your name → View Profile → three-dot menu → Copy member ID.
-
-### Edit config.env
+`knowledge/profile.example.md` is the AI's context for drafting replies in your
+voice. Copy and edit it:
 
 ```bash
-# slack_app/config.env
-SLACK_BOT_TOKEN=xoxb-...
-SLACK_APP_TOKEN=xapp-...
-SLACK_REVIEW_CHANNEL=U01234567  # your user ID for DMs, or C01234567 for a channel
+cp knowledge/profile.example.md knowledge/profile.md
+# edit knowledge/profile.md with your name, role, and tone
 ```
+
+Per-account files at `knowledge/<slug>.md` are also supported. These files are
+gitignored and stay on your machine.
 
 ---
 
-## 7. Run setup.sh again to verify
+## 8. Schedule daily triage
 
 ```bash
-bash setup.sh
+./bin/zero schedule
 ```
 
-All checks should pass (no warnings).
-
----
-
-## 8. Install launchd agents
-
-```bash
-bash deploy/install.sh
-```
-
-This creates two agents in `~/Library/LaunchAgents/`:
-- `com.drewl.mailtriage.plist` — runs `run.sh` daily at 07:00
-- `com.drewl.maildraftreview.plist` — runs the Slack listener (always-on)
-
-To reload after config changes:
-```bash
-bash deploy/install.sh --reload
-```
-
----
-
-## 9. Test manually
-
-Run a triage immediately (without waiting for 07:00):
-```bash
-bash run.sh
-tail -f logs/latest.log
-```
-
-Test the Slack listener:
-```bash
-cd slack_app
-source config.env
-./venv/bin/python app.py brief   # post morning briefing
-./venv/bin/python app.py post    # post any pending draft cards
-```
+This registers a launchd agent that runs the keeper at 07:00 every morning.
 
 ---
 
 ## Troubleshooting
 
 ### gws returns empty or auth errors
-- Make sure `GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file` is exported
-- Re-run `gws auth login` for the affected account
-- Check the config_dir path in accounts.json is correct
+
+- Make sure `GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file` is set — this is the most
+  common cause of silent auth failures.
+- Re-run `gws auth login` for the affected account.
+- Check the `config_dir` path in `accounts.json` is correct.
 
 ### launchd job not running
-- Check: `launchctl list | grep drewl`
-- View logs: `cat logs/launchd-triage.log`
-- Verify `run.sh` is executable: `chmod +x run.sh`
 
-### Slack app not receiving events
-- Make sure Socket Mode is enabled in the Slack app settings
-- Verify `SLACK_APP_TOKEN` starts with `xapp-`
-- Check: `logs/launchd-slack.log`
+```bash
+launchctl list | grep drewl
+cat logs/latest.log
+```
+
+Verify `run.sh` is executable: `chmod +x run.sh`
 
 ### PATH issues in launchd
-`run.sh` exports a full PATH at the top. Edit that PATH line to match your tool
-installation paths (e.g. if you use pyenv instead of anaconda, swap the path).
+
+`config.sh` prepends common Homebrew, nvm, and `~/.local/bin` paths. If your tools
+live elsewhere, add them to the `_mt_prepend` block in `config.sh`.

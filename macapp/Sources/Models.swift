@@ -20,6 +20,9 @@ struct AppState: Decodable {
     var ok = false
     var totalLoops = 0
     var needsBuild = false
+    /// True while the server is rebuilding state in the background (new in parallel server change).
+    /// The server is reachable immediately; this field signals "don't show onboarding yet".
+    var building: Bool? = nil
     var failedAccounts: [String] = []
     var accounts: [Account] = []
     var policy = ""
@@ -27,7 +30,7 @@ struct AppState: Decodable {
     var categories: [Category] = []
 
     enum K: String, CodingKey {
-        case generatedAt, ok, totalLoops, needsBuild, failedAccounts, accounts, policy, learned, categories
+        case generatedAt, ok, totalLoops, needsBuild, building, failedAccounts, accounts, policy, learned, categories
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)
@@ -35,6 +38,7 @@ struct AppState: Decodable {
         ok = try c.decodeIfPresent(Bool.self, forKey: .ok) ?? false
         totalLoops = try c.decodeIfPresent(Int.self, forKey: .totalLoops) ?? 0
         needsBuild = try c.decodeIfPresent(Bool.self, forKey: .needsBuild) ?? false
+        building = try c.decodeIfPresent(Bool.self, forKey: .building)
         failedAccounts = try c.decodeIfPresent([String].self, forKey: .failedAccounts) ?? []
         accounts = try c.decodeIfPresent([Account].self, forKey: .accounts) ?? []
         policy = try c.decodeIfPresent(String.self, forKey: .policy) ?? ""
@@ -185,9 +189,11 @@ struct Job: Decodable {
     var message = ""
     var error: String?
 
+    var authUrl: String?
+
     var isRunning: Bool { state == "running" }
 
-    enum K: String, CodingKey { case id, kind, state, started, finished, message, error }
+    enum K: String, CodingKey { case id, kind, state, started, finished, message, error, authUrl }
     init() {}
     init(id: Int, kind: String?, state: String, message: String) {
         self.id = id; self.kind = kind; self.state = state; self.message = message
@@ -201,6 +207,7 @@ struct Job: Decodable {
         finished = try c.decodeIfPresent(Int.self, forKey: .finished) ?? 0
         message = try c.decodeIfPresent(String.self, forKey: .message) ?? ""
         error = try c.decodeIfPresent(String.self, forKey: .error)
+        authUrl = try c.decodeIfPresent(String.self, forKey: .authUrl)
     }
 }
 
@@ -225,11 +232,59 @@ struct LabelInfo: Decodable, Identifiable {
 // User-controllable timing settings (persisted server-side in app/settings.json).
 struct Settings: Decodable {
     var graceDays: Int = 0
-    enum K: String, CodingKey { case graceDays }
+    var scheduleHour: Int = 7
+    var scheduleMinute: Int = 0
+    var scheduleDays: [Int] = [1, 2, 3, 4, 5]
+    var notifyOnRun: Bool = true
+    var autoDraft: Bool = false
+    var provider: String = "claude"
+
+    enum K: String, CodingKey {
+        case graceDays, scheduleHour, scheduleMinute, scheduleDays, notifyOnRun, autoDraft, provider
+    }
     init() {}
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)
         graceDays = try c.decodeIfPresent(Int.self, forKey: .graceDays) ?? 0
+        scheduleHour = try c.decodeIfPresent(Int.self, forKey: .scheduleHour) ?? 7
+        scheduleMinute = try c.decodeIfPresent(Int.self, forKey: .scheduleMinute) ?? 0
+        scheduleDays = try c.decodeIfPresent([Int].self, forKey: .scheduleDays) ?? [1, 2, 3, 4, 5]
+        notifyOnRun = try c.decodeIfPresent(Bool.self, forKey: .notifyOnRun) ?? true
+        autoDraft = try c.decodeIfPresent(Bool.self, forKey: .autoDraft) ?? false
+        provider = try c.decodeIfPresent(String.self, forKey: .provider) ?? "claude"
+    }
+}
+
+// One AI provider the server can use for runs (from GET /api/provider-status).
+struct ProviderInfo: Decodable, Identifiable {
+    var name = ""
+    var label = ""
+    var available = false
+    var version: String?
+    var active = false
+
+    var id: String { name }
+
+    enum K: String, CodingKey { case name, label, available, version, active }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: K.self)
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
+        available = try c.decodeIfPresent(Bool.self, forKey: .available) ?? false
+        version = try c.decodeIfPresent(String.self, forKey: .version)
+        active = try c.decodeIfPresent(Bool.self, forKey: .active) ?? false
+    }
+}
+
+struct ProviderStatus: Decodable {
+    var providers: [ProviderInfo] = []
+    var active: String = ""
+
+    enum K: String, CodingKey { case providers, active }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: K.self)
+        providers = try c.decodeIfPresent([ProviderInfo].self, forKey: .providers) ?? []
+        active = try c.decodeIfPresent(String.self, forKey: .active) ?? ""
     }
 }
 
@@ -347,11 +402,19 @@ struct KeeperAPI {
         _ = try await sendJSON("/api/categories", method: "PUT", body: ["categories": cats.map(\.json)])
     }
 
-    /// Timing settings (grace window). Read/written server-side.
+    /// Timing settings (grace window + schedule + flags). Read/written server-side.
     func settings() async throws -> Settings { try await get("/api/settings") }
-    func saveSettings(graceDays: Int) async throws {
-        _ = try await sendJSON("/api/settings", method: "PUT", body: ["grace_days": graceDays])
+    /// Partial PUT — only the keys passed are merged on the server. Returns the full
+    /// merged settings so callers can keep @Published state in sync.
+    @discardableResult
+    func saveSettings(_ partial: [String: Any]) async throws -> Settings {
+        let data = try await sendJSON("/api/settings", method: "PUT", body: partial)
+        do { return try Self.decoder.decode(Settings.self, from: data) }
+        catch { throw KeeperError.badData }
     }
+
+    /// Which AI providers are installed and which one is active.
+    func providerStatus() async throws -> ProviderStatus { try await get("/api/provider-status") }
 
     /// Whether a Google OAuth client is configured + whether any account is connected.
     func credentialsStatus() async throws -> CredStatus { try await get("/api/credentials-status") }
@@ -365,6 +428,12 @@ struct KeeperAPI {
     /// Delete a learned preference and suppress it so it's never re-learned.
     func rejectLearned(_ text: String) async throws {
         _ = try await sendJSON("/api/learned/reject", method: "POST", body: ["text": text])
+    }
+
+    /// Cancel the currently running sign-in job (POST /api/job/cancel → {ok:true}).
+    /// Ignores response body; caller reloads state.
+    func cancelJob() async throws {
+        _ = try await postRaw("/api/job/cancel", [:])
     }
 
     // MARK: label cleanup

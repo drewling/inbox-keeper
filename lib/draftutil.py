@@ -11,11 +11,35 @@ Subject and body are passed base64 (utf-8) to avoid shell-escaping problems.
 All gws calls run against the account whose config dir is given, using the
 file keyring backend so they work headlessly.
 """
-import argparse, base64, json, os, subprocess, sys
+import argparse, base64, html as _html, json, os, subprocess, sys
 from email.message import EmailMessage
 from email.utils import formataddr, parseaddr
 
 GWS = os.environ.get("GWS_BIN", "gws")
+
+_SIG_CACHE = {}  # ponytail: module-level cache, keyed by config_dir
+
+
+def _fetch_signature(config_dir):
+    if config_dir in _SIG_CACHE:
+        return _SIG_CACHE[config_dir]
+    try:
+        data = _gws(config_dir, ["gmail", "users", "settings", "sendAs", "list",
+                                  "--params", json.dumps({"userId": "me"})])
+        entries = data.get("sendAs", [])
+        sig = ""
+        fallback = ""
+        for e in entries:
+            if e.get("isDefault"):
+                sig = e.get("signature", "")
+                break
+            if e.get("isPrimary") and not fallback:
+                fallback = e.get("signature", "")
+        result = sig if sig else fallback
+    except Exception:
+        result = ""
+    _SIG_CACHE[config_dir] = result
+    return result
 
 
 def _env(config_dir):
@@ -80,7 +104,8 @@ def _thread_reply_headers(config_dir, thread_id):
 def _build_raw(config_dir, thread_id, to, subject, body, html=None):
     """Build a reply. `body` is the plain-text part; if `html` is given, the
     message is multipart/alternative (plain + html) so rich formatting renders in
-    clients that support it and degrades gracefully where they don't."""
+    clients that support it and degrades gracefully where they don't.
+    The account's default Gmail sendAs signature is appended to the HTML part only."""
     msg = EmailMessage()
     msg["From"] = _profile_email(config_dir)
     msg["To"] = to
@@ -92,9 +117,17 @@ def _build_raw(config_dir, thread_id, to, subject, body, html=None):
     if references:
         msg["References"] = references
     msg.set_content(body)
+    sig = _fetch_signature(config_dir)
     if html and html.strip():
-        # Wrap the fragment and pin UTF-8 so curly quotes / en-dashes render right.
-        doc = f"<!doctype html><html><body>{html}</body></html>"
+        body_html = html
+    elif sig:
+        # No HTML body supplied but we have a signature: synthesise one so the sig rides along.
+        body_html = _html.escape(body).replace("\n", "<br>")
+    else:
+        body_html = None
+    if body_html is not None:
+        sig_block = f"<br><br>{sig}" if sig else ""
+        doc = f"<!doctype html><html><body>{body_html}{sig_block}</body></html>"
         msg.add_alternative(doc, subtype="html", charset="utf-8")
     return base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
 

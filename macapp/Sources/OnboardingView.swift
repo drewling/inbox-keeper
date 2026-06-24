@@ -48,7 +48,7 @@ struct OnboardingView: View {
                         .foregroundStyle(Paper.ink4)
                     if !m.preflight.python { ToolRow(name: "Python 3", cmd: "xcode-select --install") }
                     if !m.preflight.gws { ToolRow(name: "Google Workspace CLI", cmd: "npm i -g @googleworkspace/cli") }
-                    if !m.preflight.claude { ToolRow(name: "Claude CLI", cmd: "claude.ai/download") }
+                    if !m.preflight.claude { ToolRow(name: "Claude Code CLI", cmd: "npm i -g @anthropic-ai/claude-code") }
                 }
                 .padding(14)
                 .glassSurface(12, tint: Paper.danger.opacity(0.14))
@@ -64,20 +64,43 @@ struct OnboardingView: View {
                 CredentialsCard()
             } else {
                 // Connect the first inbox. gws is required for the OAuth flow.
+                // While the sign-in job is running, show the live message from the
+                // server and a Cancel button so the user is never stuck.
                 Button { m.addAccount() } label: {
                     HStack(spacing: 7) {
                         if m.isBusy { ProgressView().controlSize(.small).tint(.white) }
                         else { Image(systemName: "plus").font(.system(size: 12, weight: .bold)) }
-                        Text(m.isBusy ? "Opening your browser…" : "Connect your first inbox")
+                        Text(m.isBusy ? "Signing in…" : "Connect your first inbox")
                     }
                 }
                 .buttonStyle(PrimaryButtonStyle(enabled: m.preflight.gws && !m.isBusy))
                 .disabled(!m.preflight.gws || m.isBusy)
 
-                Text("Sign-in opens in your browser. The app never sees your password.")
-                    .font(.system(size: 11)).foregroundStyle(Paper.ink4)
-                    .multilineTextAlignment(.center).frame(maxWidth: 300)
-                    .padding(.top, 10)
+                // Cancel is always reachable during a sign-in — the user must be able
+                // to back out of a stuck OAuth flow without force-quitting.
+                if m.isBusy {
+                    if let msg = m.job?.message, !msg.isEmpty {
+                        Text(msg)
+                            .font(.system(size: 11)).foregroundStyle(Paper.ink4)
+                            .multilineTextAlignment(.center).frame(maxWidth: 300)
+                            .padding(.top, 6)
+                    }
+                    if let urlStr = m.job?.authUrl, let url = URL(string: urlStr) {
+                        Button("Open the sign-in page") { NSWorkspace.shared.open(url) }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Paper.accentSoft)
+                            .padding(.top, 2)
+                    }
+                    Button("Cancel sign-in") { m.cancelJob() }
+                        .buttonStyle(GhostButtonStyle())
+                        .padding(.top, 8)
+                } else {
+                    Text("Sign-in opens in your browser. The app never sees your password.")
+                        .font(.system(size: 11)).foregroundStyle(Paper.ink4)
+                        .multilineTextAlignment(.center).frame(maxWidth: 300)
+                        .padding(.top, 10)
+                }
             }
 
             Spacer(minLength: 24)
@@ -114,7 +137,7 @@ struct BacklogStep: View {
 
             Text("Start from a calm inbox")
                 .font(.system(size: 19, weight: .semibold)).kerning(-0.2).padding(.top, 16)
-            Text("Optionally archive everything older than a date you choose, so zero only weighs what’s recent. Nothing is deleted — it’s one tap to undo.")
+            Text("Optionally archive everything older than a date you choose, so zero only weighs what's recent. Nothing is deleted — it's one tap to undo.")
                 .font(.system(size: 13)).foregroundStyle(Paper.ink3)
                 .multilineTextAlignment(.center).frame(maxWidth: 320).padding(.top, 6)
 

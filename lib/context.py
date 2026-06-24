@@ -6,7 +6,7 @@ Pulls the three sources the draft pipeline grounds on:
   2. Prior correspondence with the sender — establishes relationship + the owner's tone
      with this person, and whether any two-way history exists at all (the key
      cold-outreach signal).
-  3. The Drewl profile / reply boundaries (knowledge/drewl.md).
+  3. The user profile / reply boundaries (knowledge/profile.md).
 
 All Gmail access goes through gws via draftutil helpers, headless-safe.
 """
@@ -24,7 +24,7 @@ import config  # noqa: E402
 PROFILE_PATH = config.PROFILE_PATH
 
 
-def drewl_profile():
+def user_profile():
     try:
         with open(PROFILE_PATH) as f:
             return f.read().strip()
@@ -116,7 +116,7 @@ def gather(config_dir, thread_msgs, sender_email, current_thread_id, profile_ema
     """Bundle everything the gate + drafter need."""
     has_hist, hist = sender_history(config_dir, sender_email, current_thread_id, profile_email)
     return {
-        "profile": drewl_profile(),
+        "profile": user_profile(),
         "thread_text": render_thread(thread_msgs, profile_email),
         "has_prior_history": has_hist,
         "history_summary": hist,

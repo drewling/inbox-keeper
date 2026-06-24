@@ -44,6 +44,7 @@ macapp/build/
 # Dashboard state (generated at runtime)
 app/state.json
 app/category_label_history.json
+app/settings.json
 
 # Editor / tooling dirs
 .claude/

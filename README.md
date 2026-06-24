@@ -103,28 +103,65 @@ When unsure, the policy keeps the thread. Everything archived is one tap away.
 
 ---
 
-## Install
+## Install & first run
 
-### Option 1: Download the app (recommended)
+### Prerequisites
 
-1. Go to the [Releases page](https://github.com/drewling/zero/releases)
-   and download the latest `zero.dmg`.
-2. Open the .dmg and drag **zero** to your Applications folder.
-3. **First launch:** because zero is source-available and not notarized
-   with a paid Apple Developer ID, macOS will block the first open. Right-click
-   the app icon and choose **Open**, then confirm in the dialog. You only need to
-   do this once.
+| Requirement | Install | Notes |
+|---|---|---|
+| macOS 26 (Tahoe, Apple Silicon) | — | Uses the native Liquid Glass API; Intel untested |
+| Python 3 | `brew install python3` | Used by the local server and all judgment logic |
+| `gws` CLI | `npm install -g @googleworkspace/cli` | Official Google Workspace CLI |
+| `claude` CLI | `npm install -g @anthropic-ai/claude-code` | Per-thread judgment and reply drafts |
 
-   Alternatively, remove the quarantine flag from Terminal:
+### Step-by-step (app path)
+
+1. **Install Node** (needed for `gws` and `claude`):
    ```bash
-   xattr -dr com.apple.quarantine /Applications/zero.app
+   brew install node
    ```
-   This is a standard macOS gate for apps from outside the App Store. The source
-   is here for you to read and verify.
 
-### Option 2: Build from source
+2. **Install the Google Workspace CLI and authenticate**:
+   ```bash
+   npm install -g @googleworkspace/cli
+   ```
+   Create a free OAuth client at [console.cloud.google.com](https://console.cloud.google.com/):
+   - Enable the **Gmail API** on your project.
+   - **Credentials → Create Credentials → OAuth client ID → Desktop app** → download the JSON.
 
-Requires: Xcode command-line tools (`xcode-select --install`), macOS 26 (Tahoe, Apple Silicon). The panel uses the native macOS 26 Liquid Glass API.
+   Then authenticate (the `GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file` env var is required
+   for headless/launchd contexts — without it, auth silently fails):
+   ```bash
+   GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file gws auth login
+   ```
+   Repeat for each Gmail account you want to add, pointing `GOOGLE_WORKSPACE_CLI_CONFIG_DIR`
+   at each account's config directory.
+
+3. **Install Claude Code CLI and log in**:
+   ```bash
+   npm install -g @anthropic-ai/claude-code
+   claude    # completes login on first run
+   ```
+
+4. **Download zero** from the [Releases page](https://github.com/drewling/zero/releases)
+   and drag it to your Applications folder.
+
+   > **First launch:** Right-click the app icon → **Open** → confirm in the dialog.
+   > Or from Terminal: `xattr -dr com.apple.quarantine /Applications/zero.app`
+
+5. **Open zero.** On first launch the onboarding screen asks you to paste your OAuth
+   client JSON (downloaded in step 2), then opens a browser sign-in for each account.
+   Nothing leaves your Mac.
+
+6. **Run zero now.** Hit **Run zero now** in the app to tidy your inbox for the first
+   time. To schedule it daily: `./bin/zero schedule`.
+
+For the full step-by-step (including multi-account auth and CLI equivalents), see
+[docs/SETUP.md](docs/SETUP.md).
+
+### Build from source
+
+Requires: Xcode command-line tools (`xcode-select --install`), macOS 26 (Tahoe, Apple Silicon).
 
 ```bash
 git clone https://github.com/drewling/zero.git
@@ -132,42 +169,6 @@ cd zero/macapp
 ./build.sh           # produces zero.app in macapp/build/
 ./make-dmg.sh        # optional: packages it as a .dmg
 ```
-
----
-
-## First run
-
-When you launch zero for the first time, the app walks you through:
-
-1. **Set up Google access, then connect a Gmail account.** First time connecting
-   Google? Paste your OAuth client (a free Desktop client from the Google Cloud
-   Console) when onboarding prompts you — it stays on your Mac. Then an OAuth flow
-   opens in your browser. The app never sees your password; it uses the `gws` CLI to
-   read and label threads.
-2. **Review your keep policy.** Your plain-English policy is shown in the **Policy**
-   tab. Edit it there or directly in [keep-policy.md](keep-policy.md).
-3. **Run the keeper.** Hit **Run zero now** to tidy your inbox for the first time.
-
----
-
-## Prerequisites
-
-zero coordinates three CLI tools that must already be installed and
-authenticated before the app can do anything:
-
-| Requirement | Install | Notes |
-|---|---|---|
-| macOS 26 (Tahoe, Apple Silicon) | -- | Uses the native Liquid Glass API; Intel untested |
-| Python 3 | `brew install python` or system Python | Used by the local server and all judgment logic |
-| `gws` CLI | `npm i -g @googleworkspace/cli` | Authenticate each account with `gws auth login` |
-| `claude` CLI | See [Claude Code docs](https://docs.anthropic.com/en/docs/claude-code) | Per-thread judgment and draft generation run through it |
-
-The `gws` CLI is the official Google Workspace CLI. Each Gmail account you add
-needs its own `gws auth login` in the appropriate config directory.
-
-The `claude` CLI is Anthropic's Claude Code CLI. It is used to run per-thread
-keep/archive judgments (Claude Haiku, for volume) and to draft replies in your
-voice. You need a Claude account and the CLI configured on your machine.
 
 ---
 
@@ -200,16 +201,6 @@ There is nothing else to configure.
 - **Gmail access uses your own credentials.** The `gws` CLI authenticates with
   your Google account via OAuth; zero never handles your password or OAuth
   tokens directly.
-
----
-
-## Beyond the keeper
-
-This repo also contains the fuller morning pipeline that zero grew out of:
-AI-drafted replies reviewed from Slack, a missed-items catch-up sweep, and a
-combined daily digest. Those are optional and documented in
-[docs/PIPELINE.md](docs/PIPELINE.md). The keeper and its panel are the core product;
-the legacy pipeline is the engine room, available if you want it.
 
 ---
 

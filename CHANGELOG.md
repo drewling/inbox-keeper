@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-06-25
+
+### Added
+
+- **Configurable daily routine.** Settings now lets you choose when the keeper runs (hour and minute), which days of the week, and whether macOS notifies you when a run finishes. Changing the schedule regenerates the launch agent automatically, with no terminal.
+- **AI engine settings.** A new "Intelligence" section shows which agent SDK zero is connected to (Claude, with its version), backed by a provider abstraction (`lib/llm.py`) so judgement and drafting both route through one place. Codex and Hermes are listed on the roadmap and shown as not-yet-available until wired.
+- **Quit from inside the app.** An overflow menu in the panel's top bar (showing the version) and a right-click menu on the menu-bar icon both offer "Quit zero". Left-click still toggles the panel.
+- **Replies use your Gmail signature.** Drafts now append your account's default Gmail `sendAs` signature to the HTML part. If you have none, drafts are unchanged.
+- **Witty drafting messages.** While a reply is being written, the composer cycles through short, changing loading lines instead of a static one.
+- **10 new moments of delight** during normal use: a calm "inbox at zero" arrival, rolling counts, a satisfying archive dissolve, the run button morphing into live progress, refined row hover, the composer rising into place, a "sent" confirmation, spatial tab transitions, a refresh sheen, and a first-paint cascade. All respect Reduce Motion.
+- **Resilient first run and sign-in.** The panel now shows a calm "Starting…" state while the local engine boots (it no longer blocks or looks like onboarding), and the local server starts listening immediately instead of waiting on a state rebuild. Connecting a Gmail account opens your browser automatically, offers a fallback "Open the sign-in page" link, can be cancelled at any time, and times out instead of hanging.
+
+### Changed
+
+- **The "What to keep" box is now "Rules"** and is always pre-filled with sensible starter rules on a fresh install.
+- **Categories editor redesigned.** Each category is a unified emoji + colour token; the colour picker is a curated palette plus an in-app hue/saturation/brightness control. The macOS system colour picker is never opened.
+- **New app icon:** a Google-blue squircle with a bold check, in the native macOS style.
+- **Landing page re-laid-out** for balance: a two-column hero with a larger app mock, varied section rhythm, an asymmetric trust section, and richer per-account chips.
+- **Setup is documented end-to-end.** The README now has one numbered install-and-first-run path with the correct `@googleworkspace/cli` package and the required `gws auth login` (with `GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file`) and Claude CLI steps. The architecture doc was rewritten to describe the current app and local service.
+
+### Fixed
+
+- **Undo (Cmd-Z) works in the reply editor** and no longer reverts your manual edits when you adjust or regenerate a draft.
+- **"Couldn't check your inboxes / HTTP request failed" clears itself.** The local service rebuilds a stale failed state on launch instead of serving it indefinitely, so a transient error no longer sticks across restarts. (`GOOGLE_WORKSPACE_CLI_TOKEN` is still stripped defensively in every path.)
+- **Sign-in no longer hangs.** Connecting an account could get stuck on "Opening your browser to sign in…" forever: the sign-in helper, with no terminal, printed its consent URL instead of launching a browser, and timed-out attempts leaked stray processes. zero now reads that URL and opens the browser itself, kills the whole process group on cancel or timeout, and reports accurate errors (it only shows the OAuth-setup guidance when credentials are genuinely missing).
+- **UI polish:** the colour picker's H/S/B sliders are vertically aligned and track the cursor; the schedule preset pills ("Weekdays" / "Every day") no longer wrap; and the top-bar overflow menu no longer shows a stray focus ring when the panel opens.
+
+### Removed
+
+- The legacy Slack review pipeline (`slack_app/`, the deploy installer and daemon plist) and its shell wrappers, plus unused modules (`build_briefing.py`, `draft_one.py`, `undo_inbox_zero.py`, `gate_audit.py`, `test_gate.py`, `verify_archive.py`) and orphaned bytecode.
+- The legacy `claude -p TRIAGE.md` step from the daily run (and `TRIAGE.md`, `fetch_inbox.sh`, `ensure_labels.sh`). The scheduled run now uses the same keeper engine as the app.
+- An internal org name from a source identifier (`drewl_profile` is now `user_profile`).
+
 ## [1.4.1] - 2026-06-24
 
 ### Fixed
@@ -85,6 +118,7 @@ Initial public release.
 - Native macOS 26 Liquid Glass menu-bar app with a popover panel.
 - `.dmg` installer with guided onboarding for first-time setup.
 
-[Unreleased]: https://github.com/drewling/zero/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/drewling/zero/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/drewling/zero/compare/v1.4.1...v1.5.0
 [1.1.0]: https://github.com/drewling/zero/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/drewling/zero/releases/tag/v1.0.0

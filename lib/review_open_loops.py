@@ -11,7 +11,7 @@ Reversible (dated recovery label). Dry-run by default.
 
 Usage: review_open_loops.py <config_dir> <account_label> [--execute] [--chunk 50]
 """
-import argparse, json, os, subprocess, sys
+import argparse, json, os, sys
 from email.utils import parseaddr
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -22,7 +22,7 @@ import thin_protected as tp   # noqa: E402
 import draftutil as du        # noqa: E402
 import learning               # noqa: E402
 
-CLAUDE = os.environ.get("CLAUDE_BIN", "claude")
+import llm as _llm  # noqa: E402
 
 _CATEGORIES_PATH = os.path.join(ROOT, "categories.json")
 _LABEL_HISTORY_PATH = os.path.join(ROOT, "app", "category_label_history.json")
@@ -224,14 +224,9 @@ def _classify(chunk):
     prompt = (_learned_preface()
               + PROMPT_HEAD.format(policy=_policy_text(), categories_section=categories_section)
               + "\n".join(lines))
-    try:
-        r = subprocess.run([CLAUDE, "-p", prompt, "--model", "haiku"],
-                           capture_output=True, text=True, timeout=150)
-    except subprocess.TimeoutExpired:
+    txt, ok = _llm.run_prompt(prompt, model="haiku", timeout=150)
+    if not ok:
         return {}
-    if r.returncode != 0:
-        return {}
-    txt = r.stdout
     s, e = txt.find("{"), txt.rfind("}")
     if s < 0 or e < 0:
         return {}
