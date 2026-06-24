@@ -109,22 +109,34 @@ def _load_accounts():
 
 def _run_keeper(payload):
     """Run the open-loop sweep across all accounts at the daily grace, then rebuild."""
-    grace = int(payload.get("grace_days", 2))
+    # grace 0: review the whole inbox and trust the keep-bar (fresh noise gets set
+    # aside too; genuine fresh mail is kept; everything is reversible via Undo).
+    grace = int(payload.get("grace_days", 0))
     accts = _load_accounts()
-    failures = []
-    for acct in accts:
+    failures, set_aside, kept = [], 0, 0
+    for i, acct in enumerate(accts, 1):
         cfg = acct["config_dir"]
         email = acct.get("email", acct.get("slug", cfg))
-        _set_job_message(f"Keeping {email}...")
+        _set_job_message(f"Reviewing {email} ({i}/{len(accts)})…")
         r = subprocess.run([PYTHON, os.path.join(HERE, "review_open_loops.py"),
                             cfg, email, "--grace-days", str(grace), "--execute"],
                            env=_gws_env(), capture_output=True, text=True, timeout=600)
         if r.returncode != 0:
             failures.append(f"{email}: {(r.stderr or r.stdout or '').strip()[-200:]}")
+        else:
+            line = [l for l in r.stdout.splitlines() if l.strip().startswith("{")]
+            if line:
+                try:
+                    d = json.loads(line[-1])
+                    set_aside += d.get("to_archive_threads", 0) or 0
+                    kept += d.get("to_keep_threads", 0) or 0
+                except Exception:
+                    pass
+        _set_job_message(f"Set aside {set_aside} so far · {kept} still need you…")
     # Update what we've learned from recent actions (best-effort; gated on signals).
     subprocess.run([PYTHON, os.path.join(HERE, "learn.py")],
                    env=_gws_env(), capture_output=True, text=True, timeout=180)
-    _set_job_message("Refreshing...")
+    _set_job_message(f"Set aside {set_aside}, {kept} still need you")
     _build_state_blocking()
     if failures:
         raise RuntimeError("Some accounts failed: " + " | ".join(failures))
@@ -450,8 +462,9 @@ def _start_job(kind, payload):
         try:
             _JOB_KINDS[kind](payload or {})
             with _job_lock:
-                _job.update(state="done", finished=int(time.time()),
-                            message="Done")
+                # Keep the last informative message (e.g. "Set aside 26, 30 still
+                # need you") so the panel can show a real summary, not just "Done".
+                _job.update(state="done", finished=int(time.time()))
         except Exception as exc:
             with _job_lock:
                 _job.update(state="error", finished=int(time.time()),

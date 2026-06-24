@@ -67,9 +67,9 @@ for acct in accts:
   echo "=== demote done $(date +%H:%M:%S) ==="
 
   # --- Open-loop maintenance: archive threads already dealt with (reversible) ---
-  # Keeps the inbox at "only what still needs Tayo". Grace of 2 days means fresh
-  # mail is never touched before he has seen it; older settled threads get archived.
-  echo "--- open-loop sweep (all accounts, grace 2d) ---"
+  # Keeps the inbox at "only what still needs you". grace 0 = review the whole
+  # inbox and trust the keep-bar; genuine fresh mail is kept, noise is set aside.
+  echo "--- open-loop sweep (all accounts, grace 0) ---"
   /opt/homebrew/bin/python3 -c "
 import json
 a = json.load(open('$MAIL_TRIAGE_ACCOUNTS'))
@@ -77,7 +77,7 @@ accts = a if isinstance(a, list) else a.get('accounts', [])
 for acct in accts:
     print(acct['config_dir'] + '\t' + acct.get('email', acct['config_dir']))
 " | while IFS=$'\t' read -r cfg email; do
-    "$MAIL_TRIAGE_PYTHON" "$MAIL_TRIAGE_LIB/review_open_loops.py" "$cfg" "$email" --grace-days 2 --execute \
+    "$MAIL_TRIAGE_PYTHON" "$MAIL_TRIAGE_LIB/review_open_loops.py" "$cfg" "$email" --grace-days 0 --execute \
       || { echo "open-loop sweep failed for $email"; rc=1; }
   done
   echo "=== open-loop done $(date +%H:%M:%S) ==="

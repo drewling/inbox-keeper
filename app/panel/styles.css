@@ -422,6 +422,8 @@ html.in-app .panel {
 .empty .mark svg { width: 24px; height: 24px; stroke: var(--clear); }
 .empty .mark.warn { background: oklch(94% 0.04 40); }
 .empty .mark.warn svg { stroke: var(--danger); }
+.empty.tidying .mark { background: var(--paper-sunken); }
+.empty.tidying p { font-variant-numeric: tabular-nums; }
 .empty h2 { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
 .empty p { font-size: 13px; color: var(--ink-3); margin-top: 6px; line-height: 1.5; }
 

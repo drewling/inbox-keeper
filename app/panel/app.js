@@ -18,6 +18,8 @@ let STATE = null;
 const _VIEWS = ["loops", "accounts", "undo", "policy"];
 let VIEW = _VIEWS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "loops";
 let JOB_POLL = null;
+let KEEPING = false;     // a keeper run is in progress (show the tidying state)
+let AUTO_RAN = false;    // auto-run-when-stale fires at most once per panel open
 
 /* ---------- helpers ---------- */
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
@@ -98,6 +100,18 @@ async function loadState() {
   STATE = data;
   renderStrip();
   render();
+  maybeAutoRun();
+}
+
+// Self-maintaining: if the data is stale when the panel opens, quietly run the
+// keeper once (it shows the tidying state) so you never open to stale noise.
+function maybeAutoRun() {
+  if (AUTO_RAN || KEEPING || JOB_POLL || !STATE) return;
+  const ageSec = Date.now() / 1000 - (STATE.generated_at || 0);
+  if (ageSec > 1800 && (STATE.accounts || []).some((a) => a.ok)) {
+    AUTO_RAN = true;
+    runKeeper();
+  }
 }
 
 /* ---------- top strip ---------- */
@@ -139,6 +153,13 @@ function failureBanner() {
 
 function renderLoops() {
   if (!STATE || STATE.needs_build) return skeleton();
+  if (KEEPING) {
+    return `<div class="empty tidying">
+      <div class="mark"><span class="spinner dark"></span></div>
+      <h2>Tidying your inboxes</h2>
+      <p data-keeper-status>Starting…</p>
+    </div>`;
+  }
   const rows = loopRows();
   const total = STATE.total_loops ?? rows.length;
   const anyFailed = (STATE.accounts || []).some((a) => !a.ok);
@@ -327,15 +348,18 @@ function renderAction() {
     return;
   }
   const label = running ? "Keeping…" : "Run keeper now";
-  actionEl.innerHTML = `<span class="status${running ? " run" : ""}" id="status">${running ? "" : "Tidies every inbox to only what needs you."}</span>
+  actionEl.innerHTML = `<span class="status${running ? " run" : ""}" id="status" data-keeper-status>${running ? "" : "Tidies every inbox to only what needs you."}</span>
     <button class="btn btn-primary" id="run" ${running ? "disabled" : ""}>
       ${running ? `<span class="spinner"></span>` : runSvg()}<span>${label}</span></button>`;
   $("#run").onclick = runKeeper;
 }
 
 function setStatus(msg, run) {
-  const s = $("#status");
-  if (s) { s.textContent = msg; s.classList.toggle("run", !!run); }
+  // Update the footer status and the tidying-state line together.
+  document.querySelectorAll("[data-keeper-status]").forEach((s) => {
+    s.textContent = msg;
+    s.classList.toggle("run", !!run);
+  });
 }
 
 /* ---------- render ---------- */
@@ -460,11 +484,15 @@ function pollJob() {
     if (!data) return;               // transient unreachable; keep polling
     if (data.message) setStatus(data.message, true);
     if (data.state === "done") {
+      KEEPING = false;
       stopPoll();
       await loadState();
-      toast({ add_account: "Account added", run: "Inbox updated",
-              undo: "Restored", refresh: "Updated" }[data.kind] || "Done");
+      // For a keeper run, show the real summary it produced ("Set aside N, M still need you").
+      const msg = data.kind === "run" ? (data.message || "Inbox updated")
+        : ({ add_account: "Account added", undo: "Restored", refresh: "Updated" }[data.kind] || "Done");
+      toast(msg);
     } else if (data.state === "error") {
+      KEEPING = false;
       stopPoll();
       const what = data.kind === "add_account" ? "Couldn’t add account" : "Run failed";
       toast(what + ": " + (data.error || "unknown"));
@@ -475,8 +503,11 @@ function pollJob() {
 function stopPoll() { clearInterval(JOB_POLL); JOB_POLL = null; renderAction(); }
 
 async function runKeeper() {
+  KEEPING = true;
+  if (VIEW === "loops") render();   // show the tidying state immediately
   setStatus("Starting…", true);
-  await startJob("/api/run", { grace_days: 2 });
+  const ok = await startJob("/api/run", {});   // server default grace 0
+  if (!ok) { KEEPING = false; if (VIEW === "loops") render(); }
 }
 
 async function doUndo(slug, label, btn) {
