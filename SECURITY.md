@@ -1,5 +1,11 @@
 # Security
 
+**In plain terms:** zero runs entirely on your own Mac with your own Google and
+Claude credentials. There is no zero server in the middle, so the project cannot
+see your mail. Nothing is ever deleted (only archived and labelled, reversibly),
+and the local engine is reachable only from your own machine. The details and how
+to report a problem are below.
+
 ## Reporting a vulnerability
 
 Please do not file public GitHub issues for security vulnerabilities.

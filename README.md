@@ -39,10 +39,10 @@ reversibly, so the inbox stops being a swamp without anything going missing.
 
 Four views, one icon in the menu bar:
 
-| Open loops | Accounts | Undo | Policy |
+| Open loops | Accounts | Undo | Settings |
 |:---:|:---:|:---:|:---:|
-| ![Open loops](design/screenshots/panel-loops.png) | ![Accounts](design/screenshots/panel-accounts.png) | ![Undo](design/screenshots/panel-undo.png) | ![Policy](design/screenshots/panel-policy.png) |
-| What still needs you, across all accounts | Per-account inbox and archive counts | Restore any day's archived mail in one tap | The one thing you configure, in plain English |
+| ![Open loops](design/screenshots/panel-loops.png) | ![Accounts](design/screenshots/panel-accounts.png) | ![Undo](design/screenshots/panel-undo.png) | ![Settings](design/screenshots/panel-policy.png) |
+| What still needs you, across all accounts | Per-account inbox and archive counts | Restore any day's archived mail in one tap | Your **Rules** (plain English), categories, daily schedule, and AI engine |
 
 The panel is a dark "Raycast"-style liquid-glass overlay. Tap any thread to open
 it in Gmail, hover it to **Reply** (drafts in your voice, stays local until you
@@ -71,7 +71,7 @@ opens instantly; it never talks to Gmail directly.
 Three properties, in priority order:
 
 1. **Reversible by construction.** "Archive" means remove the INBOX label and add
-   a dated recovery label (e.g. `keeper/undo/2026-06-24`). Mail stays in All Mail,
+   a dated recovery label (e.g. `zero/undo/2026-06-24`). Mail stays in All Mail,
    fully searchable. Any day's sweep restores in one tap from the **Undo** view.
    Nothing is ever deleted.
 2. **Ambient.** No new app to live in. Your Gmail and Apple Mail stay exactly as
@@ -85,7 +85,7 @@ Three properties, in priority order:
 ## How "needs you" is decided
 
 You edit one plain-language file, [keep-policy.md](keep-policy.md), or the
-**Policy** tab in the panel. No regex, no DSL. The default:
+**Rules** section under the **Settings** tab in the panel. No regex, no DSL. The default:
 
 > Keep a thread only if a real person is awaiting your reply or decision, there is
 > an unanswered direct question or request addressed to you, a payment has actually
@@ -176,8 +176,13 @@ cd zero/macapp
 
 ## Configuration
 
-**One file.** Edit [keep-policy.md](keep-policy.md) directly or via the **Policy**
-tab in the panel. Write it in plain English. No syntax to learn.
+**One file.** Edit [keep-policy.md](keep-policy.md) directly or via the **Rules**
+section under the **Settings** tab in the panel. Write it in plain English. No syntax to learn.
+
+Everything else is optional and lives under **Settings**: your **categories**, the
+**daily schedule** (what time, which days, whether macOS notifies you), how far back
+to label archived mail, and which **AI engine** to use (Claude by default; Codex,
+Hermes, or another agent CLI if you have one installed).
 
 **Optional voice grounding.** Copy `knowledge/profile.example.md` to
 `knowledge/profile.md` and fill it in. The drafter uses it as background when

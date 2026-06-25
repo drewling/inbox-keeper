@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-06-25
+
+### Fixed
+
+- **The selected tab now renders cleanly.** The active segmented-nav tab (e.g. "Accounts") was drawing as a washed-out, half-rendered glass pill with dimmed text, because it stacked a fill plus a glass surface inside a glass container that no longer had a sibling glass layer. It is now a crisp raised pill (subtle fill, hairline rim, soft shadow) on a gently sunken track, sliding between tabs, with the active label at full brightness.
+
+### Changed
+
+- **Clearer documentation.** The README now names the fourth tab correctly (Settings, which holds Rules, categories, the daily schedule, and the AI engine), uses the current `zero/undo/` recovery-label example, and lists what lives under Settings. SECURITY.md opens with a plain-language privacy summary.
+
 ## [1.6.0] - 2026-06-25
 
 A depth release: the learning loop actually closes, labeling reaches your archive, the engine is provider-agnostic, the panel seam is gone, and the whole surface is more consistently glassy. The product landing page is rebuilt and live.
@@ -162,7 +172,8 @@ Initial public release.
 - Native macOS 26 Liquid Glass menu-bar app with a popover panel.
 - `.dmg` installer with guided onboarding for first-time setup.
 
-[Unreleased]: https://github.com/drewling/zero/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/drewling/zero/compare/v1.6.1...HEAD
+[1.6.1]: https://github.com/drewling/zero/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/drewling/zero/compare/v1.5.1...v1.6.0
 [1.5.1]: https://github.com/drewling/zero/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/drewling/zero/compare/v1.4.1...v1.5.0

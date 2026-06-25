@@ -198,9 +198,8 @@ private struct SegmentedNav: View {
     @EnvironmentObject var m: KeeperModel
     let ns: Namespace.ID
     var body: some View {
-        GlassEffectContainer(spacing: 2) {
-            HStack(spacing: 2) {
-                ForEach(Tab.allCases) { tab in
+        HStack(spacing: 2) {
+            ForEach(Tab.allCases) { tab in
                     let on = m.tab == tab
                     Button {
                         withAnimation(Motion.morph) { m.tab = tab }
@@ -212,13 +211,18 @@ private struct SegmentedNav: View {
                             .frame(maxWidth: .infinity).frame(height: 28)
                             .background {
                                 if on {
-                                    // A real Liquid-Glass pill that flows between tabs — it
-                                    // looks like a single blob of glass migrating, catching
-                                    // light, rather than a box snapping position.
-                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                        .fill(Paper.raised.opacity(0.10))
-                                        .glassSurface(7)
-                                        .shadow(color: .black.opacity(0.18), radius: 3, y: 1)
+                                    // A crisp raised pill that slides between tabs via
+                                    // matchedGeometry. A subtle raised fill + hairline rim +
+                                    // soft shadow reads cleanly as the selected segment (the
+                                    // macOS/Raycast standard) — reliable, unlike glass-on-glass
+                                    // inside a GlassEffectContainer, which rendered washed out.
+                                    RoundedRectangle(cornerRadius: Radius.small, style: .continuous)
+                                        .fill(Paper.raised.opacity(0.22))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: Radius.small, style: .continuous)
+                                                .strokeBorder(Paper.hairline.opacity(0.45), lineWidth: 0.75)
+                                        )
+                                        .shadow(color: .black.opacity(0.22), radius: 4, y: 1)
                                         .matchedGeometryEffect(id: "seg", in: ns)
                                 }
                             }
@@ -227,9 +231,16 @@ private struct SegmentedNav: View {
                     .buttonStyle(.plain)
                 }
             }
-            .padding(3)
-            // ponytail: GlassEffectContainer already provides the glass container; no second glassSurface needed.
-        }
+        .padding(3)
+        .background(
+            // Subtly sunken track so the raised active pill reads as elevated above it.
+            RoundedRectangle(cornerRadius: Radius.small + 3, style: .continuous)
+                .fill(Paper.sunken.opacity(0.16))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.small + 3, style: .continuous)
+                        .strokeBorder(Paper.hairline.opacity(0.10), lineWidth: 0.5)
+                )
+        )
         .padding(.horizontal, 14).padding(.vertical, 10)
         .focusEffectDisabled()         // no blue focus ring on the first-load selected tab
     }
