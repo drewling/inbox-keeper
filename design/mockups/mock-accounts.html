@@ -12,12 +12,12 @@
     }
 
     html, body {
-      width: 444px;
-      margin: 0 auto;
-      min-height: 100vh;
+      margin: 0;
+      padding: 0;
       background: #0F0E0D;
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
       -webkit-font-smoothing: antialiased;
+      overflow: hidden;
     }
 
     body {
@@ -25,6 +25,8 @@
       align-items: flex-start;
       justify-content: center;
       padding-top: 32px;
+      width: 444px;
+      min-height: fit-content;
     }
 
     .panel {
@@ -336,7 +338,7 @@
       <div class="account-row">
         <div class="avatar-lg" style="background: #1A73E8;">Y</div>
         <div class="account-mid">
-          <div class="account-email">you@gmail.com</div>
+          <div class="account-email">you@example.com</div>
         </div>
         <div class="account-right">
           <div class="count-open">1 open</div>
