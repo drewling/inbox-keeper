@@ -10,6 +10,7 @@
 import AppKit
 import SwiftUI
 import UserNotifications
+import Carbon.HIToolbox   // RegisterEventHotKey — global shortcut without Accessibility permission
 
 let PORT = ProcessInfo.processInfo.environment["KEEPER_PORT"] ?? "8765"
 let PANEL_W: CGFloat = 420
@@ -66,6 +67,23 @@ private func isInTCCProtectedDir(_ path: String) -> Bool {
 func supportDirURL() -> URL {
     FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/zero", isDirectory: true)
+}
+
+/// Append a timestamped breadcrumb to ~/Library/Logs/zero-launch.log. Launch is the
+/// one place we can't debug on someone else's Mac: if the app ever "runs but shows
+/// nothing", this file says exactly how far startup got (and whether it was running
+/// translocated / from a quarantined copy). Truncated at the start of each launch so
+/// it only ever holds the most recent run. ponytail: a handful of lines per launch.
+func launchLog(_ msg: String, reset: Bool = false) {
+    let url = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Logs/zero-launch.log")
+    let line = Data("\(Date()) \(msg)\n".utf8)
+    if reset { try? line.write(to: url); return }
+    if let h = try? FileHandle(forWritingTo: url) {
+        h.seekToEndOfFile(); h.write(line); try? h.close()
+    } else {
+        try? line.write(to: url)
+    }
 }
 
 /// First run = no connected account yet. accounts.json is written only after the
@@ -287,7 +305,13 @@ final class GlassSurface: NSView {
 
 @MainActor
 final class AppController: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
-    let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    // Created in applicationDidFinishLaunching, NOT here. Building the status item in
+    // a property initializer means it's made before the app finishes launching /
+    // registers with the status bar, which can leave the icon invisible even though
+    // the app runs fine. Create it once the app is up, on the main thread.
+    static weak var shared: AppController?
+    var statusItem: NSStatusItem!
+    private var hotKeyRef: EventHotKeyRef?
     let model = KeeperModel(port: PORT)
     var panel: KeyablePanel!
     var glassSurface: GlassSurface?
@@ -298,6 +322,8 @@ final class AppController: NSObject, NSApplicationDelegate, UNUserNotificationCe
     var notifDrainTimer: Timer?
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        Self.shared = self
+        launchLog("didFinishLaunching: bundle=\(Bundle.main.bundlePath) id=\(Bundle.main.bundleIdentifier ?? "nil") translocated=\(Bundle.main.bundlePath.contains("/AppTranslocation/"))", reset: true)
         // Dev-only: KEEPER_PREVIEW renders the panel in a normal window for a
         // screenshot of the live glass material (the menu-bar popover is hidden
         // until clicked and can't be captured headlessly).
@@ -338,20 +364,44 @@ final class AppController: NSObject, NSApplicationDelegate, UNUserNotificationCe
         setupStatusItem()
         setupPanel()
         setupNotifications()
+        registerGlobalHotkey()
+        // Displays connecting/disconnecting/rearranging can strand the status item on a
+        // gone display. Re-assert it so it comes back on an active screen.
+        NotificationCenter.default.addObserver(self, selector: #selector(screensChanged),
+                                               name: NSApplication.didChangeScreenParametersNotification,
+                                               object: nil)
         startServerAsync()
+        launchLog("didFinishLaunching: setup complete")
 
-        // First-run safety net: a brand-new user's only UI is the menu-bar icon. If
-        // the bar is full or the icon lands under the notch, the system gives the item
-        // no window and nothing shows — the app looks dead though it's running. Pop the
-        // onboarding panel (centred via positionPanel's fallback) so first launch is
-        // always visible and setup is reachable regardless of the icon.
-        if !hasConnectedAccount() { showPanel() }
+        // First-run safety net: a brand-new user's only UI is the menu-bar icon. With
+        // multiple displays the icon lands on whichever screen is active (often not the
+        // one you're looking at), and macOS gives no way to pin it. Pop the onboarding
+        // panel on the screen under the mouse so first launch is always visible and
+        // setup is reachable regardless of where the icon went.
+        if !hasConnectedAccount() { showPanel(on: screenUnderMouse()) }
+    }
+
+    /// ⌥⌘Z toggles the panel from anywhere — the reliable way in when the menu-bar
+    /// icon is on another display or hidden. Carbon RegisterEventHotKey needs no
+    /// Accessibility permission (a global NSEvent key monitor would).
+    private func registerGlobalHotkey() {
+        var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
+                                      eventKind: UInt32(kEventHotKeyPressed))
+        InstallEventHandler(GetApplicationEventTarget(), { _, _, _ -> OSStatus in
+            DispatchQueue.main.async { AppController.shared?.toggleFromHotkey() }
+            return noErr
+        }, 1, &eventType, nil, nil)
+        let id = EventHotKeyID(signature: OSType(0x5A45524F) /* 'ZERO' */, id: 1)
+        let mods = UInt32(optionKey | cmdKey)
+        let status = RegisterEventHotKey(UInt32(kVK_ANSI_Z), mods, id,
+                                         GetApplicationEventTarget(), 0, &hotKeyRef)
+        launchLog("registerGlobalHotkey: ⌥⌘Z status=\(status)")
     }
 
     // Re-opening the app from Finder/Spotlight (the natural move when you can't find
     // the menu-bar icon) re-shows the panel instead of silently doing nothing.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        showPanel()
+        showPanel(on: screenUnderMouse())
         return true
     }
 
@@ -362,8 +412,17 @@ final class AppController: NSObject, NSApplicationDelegate, UNUserNotificationCe
     /// it on launch, on a light timer (catches scheduled runs while idle), and the
     /// model also drains the instant a manual run finishes.
     private func setupNotifications() {
+        // UNUserNotificationCenter.current() throws an *uncatchable* ObjC exception when
+        // there's no valid bundle proxy (nil bundle id / odd launch context), which would
+        // kill the app right after the icon goes up. Guard the precondition so a
+        // notification hiccup can never abort launch or take the menu-bar icon down.
+        guard Bundle.main.bundleIdentifier != nil else {
+            launchLog("setupNotifications: skipped (no bundle identifier)")
+            return
+        }
         UNUserNotificationCenter.current().delegate = self
         RunNotifier.requestAuthorization()
+        launchLog("setupNotifications: done")
         Task { await model.drainPendingNotification() }
         notifDrainTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -383,7 +442,7 @@ final class AppController: NSObject, NSApplicationDelegate, UNUserNotificationCe
                                             withCompletionHandler completionHandler: @escaping () -> Void) {
         Task { @MainActor in
             self.model.tab = .loops
-            self.showPanel()
+            self.showPanel(on: self.screenUnderMouse())   // pop on the display the user is on
             completionHandler()
         }
     }
@@ -414,6 +473,20 @@ final class AppController: NSObject, NSApplicationDelegate, UNUserNotificationCe
     func setArrowX(_ x: CGFloat) { glassSurface?.arrowX = x }
 
     func setupStatusItem() {
+        // Canonical menu-bar setup: create the item HERE (in didFinishLaunching), never
+        // as a property initializer — building it before app.run() races the status-bar
+        // server and is the classic "runs fine, no icon" bug.
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        // autosaveName gives the slot a stable identity across relaunches. NOTE: macOS
+        // (Control Center) persists a per-app "NSStatusItem Visible" flag keyed by the
+        // app's *bundle id*. If that flag ever gets stuck at 0 — e.g. a first-launch
+        // crash loop, or the user ⌘-dragging the icon off the bar — EVERY status item
+        // this bundle id creates is force-hidden forever, regardless of code (this is the
+        // long-standing "no icon" bug; verified by bisection — a fresh bundle id renders
+        // instantly while com.drewling.zero stayed hidden). The escape was the bundle-id
+        // change in Info.plist. isVisible=true reasserts our intent each launch.
+        statusItem.autosaveName = "zeroMenuBar"
+        statusItem.isVisible = true
         if let button = statusItem.button {
             if let img = NSImage(systemSymbolName: "tray.full", accessibilityDescription: "zero") {
                 img.isTemplate = true
@@ -428,7 +501,23 @@ final class AppController: NSObject, NSApplicationDelegate, UNUserNotificationCe
             button.target = self
             // Receive both mouse-up events so we can distinguish right-click.
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            launchLog("setupStatusItem: created, button.image=\(button.image != nil) title=\(button.title) visible=\(statusItem.isVisible)")
+        } else {
+            launchLog("setupStatusItem: created but NO BUTTON")
         }
+        // One concise placement line once the bar has laid out — the only ground truth
+        // for a headless app's "no icon" reports (notch / wrong display / not placed).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self else { return }
+            let b = self.statusItem?.button
+            let w = b?.window
+            launchLog("probe: isActive=\(NSApp.isActive) screens=\(NSScreen.screens.count) thickness=\(NSStatusBar.system.thickness) btn=\(b != nil) win=\(w != nil) winVisible=\(w?.isVisible ?? false) onActiveSpace=\(w?.isOnActiveSpace ?? false) x=\(Int(w?.frame.minX ?? -999)) len=\(self.statusItem?.length ?? -1) visible=\(self.statusItem?.isVisible ?? false)")
+        }
+    }
+
+    @objc func screensChanged() {
+        statusItem?.isVisible = true
+        launchLog("screensChanged: re-asserted statusItem visible, iconScreen=\(iconScreen().map{ "\(Int($0.frame.width))x\(Int($0.frame.height))" } ?? "none")")
     }
 
     @objc func statusItemClicked() {
@@ -468,13 +557,27 @@ final class AppController: NSObject, NSApplicationDelegate, UNUserNotificationCe
         panel.contentView = glass
     }
 
-    @objc func togglePanel() {
-        if panel.isVisible { hidePanel() } else { showPanel() }
+    @objc func togglePanel() {                       // icon click → open under the icon
+        if panel.isVisible { hidePanel() } else { showPanel(on: iconScreen()) }
     }
 
-    func showPanel() {
+    func toggleFromHotkey() {                         // ⌥⌘Z → open on the display you're using
+        if panel.isVisible { hidePanel() } else { showPanel(on: screenUnderMouse()) }
+    }
+
+    /// The screen the menu-bar icon currently lives on (nil if macOS hasn't displayed it).
+    func iconScreen() -> NSScreen? { statusItem?.button?.window?.screen }
+
+    /// The screen under the mouse pointer — i.e. the display the user is actually on.
+    func screenUnderMouse() -> NSScreen? {
+        let p = NSEvent.mouseLocation
+        return NSScreen.screens.first { NSMouseInRect(p, $0.frame, false) }
+    }
+
+    func showPanel(on preferred: NSScreen? = nil) {
         removeMonitors()                    // never double-register (showPanel without a paired hide)
-        positionPanel()
+        let target = preferred ?? iconScreen() ?? NSScreen.main ?? NSScreen.screens.first
+        if let target { positionPanel(on: target) }
         model.onPanelOpen()                 // reload + re-attach to any live job (never reload-blow-away)
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -503,40 +606,32 @@ final class AppController: NSObject, NSApplicationDelegate, UNUserNotificationCe
         if let m = escMonitor { NSEvent.removeMonitor(m); escMonitor = nil }
     }
 
-    // Snug under the menu-bar item: the arrow tip sits just below the bar, pointing
-    // at the item's centre; the window is clamped to the screen.
-    func positionPanel() {
-        // If the status item has no on-screen window, the system couldn't place the
-        // icon — the menu bar is full or it's hidden under the notch (the classic
-        // "menu-bar app runs but shows no icon" case). Don't bail and leave the panel
-        // off-screen: centre it near the top of the main screen so it's always visible
-        // and the user can still see + use zero (and finish onboarding).
-        guard let button = statusItem.button, let bWin = button.window else {
-            centerPanelOnScreen()
-            return
+    // Open the panel on `target`. If the menu-bar icon is on this same screen, anchor the
+    // arrow snugly under it (pointing at the item's centre). Otherwise — the icon is on
+    // another display, or macOS isn't showing it at all — drop the panel top-centre of
+    // this screen with the arrow centred. Either way it lands where the user is looking,
+    // never on a display they aren't on. This is the core multi-display fix.
+    func positionPanel(on target: NSScreen) {
+        let winH = PANEL_H + ARROW_H
+        let visible = target.visibleFrame
+        if let button = statusItem.button, let bWin = button.window,
+           bWin.screen?.frame == target.frame {
+            let f = bWin.convertToScreen(button.convert(button.bounds, to: nil))
+            var originX = f.midX - (PANEL_W - 40)
+            originX = max(visible.minX + 8, min(originX, visible.maxX - PANEL_W - 8))
+            let originY = f.minY - GAP - winH
+            setArrowX(f.midX - originX)               // item centre in window coords
+            panel.setFrame(NSRect(x: originX, y: originY, width: PANEL_W, height: winH), display: true)
+        } else {
+            // Icon isn't on this screen (or isn't shown) — drop the panel at the
+            // top-RIGHT, where a menu-bar item lives, so it reads as coming from the bar
+            // rather than floating dead-centre.
+            let originX = visible.maxX - PANEL_W - 12
+            let originY = visible.maxY - winH - 12
+            setArrowX(PANEL_W - 40)                    // arrow near the right edge
+            panel.setFrame(NSRect(x: originX, y: originY, width: PANEL_W, height: winH), display: true)
         }
-        let f = bWin.convertToScreen(button.convert(button.bounds, to: nil))
-        let visible = (bWin.screen ?? NSScreen.main)?.visibleFrame
-            ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let winH = PANEL_H + ARROW_H
-        var originX = f.midX - (PANEL_W - 40)
-        originX = max(visible.minX + 8, min(originX, visible.maxX - PANEL_W - 8))
-        let originY = f.minY - GAP - winH
-        setArrowX(f.midX - originX)                  // item centre in window coords
-        panel.setFrame(NSRect(x: originX, y: originY, width: PANEL_W, height: winH), display: true)
-        panel.invalidateShadow()                     // shadow follows the rounded glass silhouette
-    }
-
-    // Fallback placement when there's no menu-bar item to anchor to (full bar / notch):
-    // top-centre of the main screen, arrow pointed at its own centre, fully on-screen.
-    func centerPanelOnScreen() {
-        let winH = PANEL_H + ARROW_H
-        let visible = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let originX = visible.midX - PANEL_W / 2
-        let originY = visible.maxY - winH - 12
-        setArrowX(PANEL_W / 2)
-        panel.setFrame(NSRect(x: originX, y: originY, width: PANEL_W, height: winH), display: true)
-        panel.invalidateShadow()
+        panel.invalidateShadow()                      // shadow follows the rounded glass silhouette
     }
 
     /// Build and launch the Python keeper server. Pure (no main-actor state) so it

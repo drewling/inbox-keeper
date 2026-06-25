@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.13] - 2026-06-26
+
+### Fixed
+
+- **The menu-bar icon now reliably appears — the real fix.** For a version or two the icon was invisible for some people, and stayed invisible no matter how the app was relaunched. The cause turned out to be subtle: macOS remembers, per app, whether your menu-bar icon is shown or hidden, and a first-launch crash in an earlier build left that setting stuck on "hidden" for zero specifically. Once stuck, nothing the app did could bring the icon back. zero now ships under a fresh app identity, which clears that stuck state for everyone — the icon shows on launch as it should. The ⌥⌘Z shortcut to open zero from anywhere, and opening the panel on whichever display you're actually using, are included too. (Because the app identity changed, macOS asks once more for permission to show notifications.)
+
 ## [1.6.12] - 2026-06-25
 
 ### Fixed
