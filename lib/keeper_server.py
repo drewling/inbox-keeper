@@ -586,6 +586,17 @@ _GMAIL_SYSTEM_IDS = frozenset({
     "CATEGORY_UPDATES", "CATEGORY_FORUMS",
 })
 
+# Human-friendly display names for Gmail's own labels (the API returns raw ids like
+# CATEGORY_PROMOTIONS); matches what Gmail itself shows in its sidebar.
+_SYS_LABEL_NAMES = {
+    "INBOX": "Inbox", "SENT": "Sent", "TRASH": "Trash", "SPAM": "Spam",
+    "DRAFT": "Drafts", "DRAFTS": "Drafts", "CHAT": "Chat",
+    "STARRED": "Starred", "IMPORTANT": "Important", "UNREAD": "Unread",
+    "CATEGORY_PERSONAL": "Personal", "CATEGORY_SOCIAL": "Social",
+    "CATEGORY_PROMOTIONS": "Promotions", "CATEGORY_UPDATES": "Updates",
+    "CATEGORY_FORUMS": "Forums",
+}
+
 # Legacy unified-taxonomy labels created by earlier zero versions
 # (before per-user categories were introduced); kept so cleanup can still find them.
 _LEGACY_LABELS = frozenset({
@@ -654,30 +665,38 @@ def _list_account_labels(slug):
     except Exception:
         label_history = set()
 
-    # Filter to user-created labels only (exclude type=="system").
-    user_labels = [l for l in (data.get("labels") or [])
-                   if l.get("type") != "system"
-                   and l.get("id") not in _GMAIL_SYSTEM_IDS]
+    all_labels = data.get("labels") or []
 
-    # Fetch threadsTotal in parallel (cap 8 workers, matching dashboard_state).
+    def _is_system(l):
+        return l.get("type") == "system" or l.get("id") in _GMAIL_SYSTEM_IDS
+
+    # Only user-created labels carry a thread count + can be deleted; fetch those
+    # counts in parallel. System (Gmail's own) labels are listed for reference only.
+    deletable = [l for l in all_labels if not _is_system(l)]
+    system = [l for l in all_labels if _is_system(l)]
+
     results = []
     with ThreadPoolExecutor(max_workers=8) as ex:
-        futs = {ex.submit(_fetch_label_detail, cfg, lab): lab for lab in user_labels}
+        futs = {ex.submit(_fetch_label_detail, cfg, lab): lab for lab in deletable}
         for f in as_completed(futs):
             try:
                 lab, threads = f.result()
                 ours = _is_ours(lab.get("name", ""), category_label_names, label_history)
                 results.append({
-                    "id": lab["id"],
-                    "name": lab.get("name", ""),
-                    "threads": threads,
-                    "ours": ours,
+                    "id": lab["id"], "name": lab.get("name", ""),
+                    "threads": threads, "ours": ours,
+                    "kind": "zero" if ours else "user",
                 })
             except Exception:
                 pass
+    for lab in system:
+        results.append({"id": lab["id"],
+                        "name": _SYS_LABEL_NAMES.get(lab["id"], lab.get("name", "")),
+                        "threads": 0, "ours": False, "kind": "system"})
 
-    # Sort: ours-first, then name A→Z.
-    results.sort(key=lambda r: (not r["ours"], r["name"]))
+    # Group order: zero's labels first, then yours, then Gmail's own; name A→Z within.
+    _order = {"zero": 0, "user": 1, "system": 2}
+    results.sort(key=lambda r: (_order.get(r["kind"], 3), r["name"].lower()))
     return {"labels": results}
 
 

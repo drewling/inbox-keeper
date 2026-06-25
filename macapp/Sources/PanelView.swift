@@ -2116,21 +2116,28 @@ private struct CleanupView: View {
                                message: "This account only has Gmail's built-in labels — nothing to clean up.")
                         .frame(minHeight: 200)
                 } else {
-                    let total = c!.labels.count, sel = c!.selected.count
+                    let labels = c!.labels
+                    let zero = labels.filter { $0.kind == "zero" }
+                    let mine = labels.filter { $0.kind == "user" }
+                    let gmail = labels.filter { $0.isSystem }
+                    let removable = zero.count + mine.count
+                    let sel = c!.selected.count
                     HStack {
-                        Text("\(sel) of \(total) selected").font(.system(size: 11.5)).foregroundStyle(Paper.ink3)
+                        Text("\(sel) of \(removable) removable selected")
+                            .font(.system(size: 11.5)).foregroundStyle(Paper.ink3)
                         Spacer()
-                        Button(sel == total ? "Select none" : "Select all") { m.setAllCleanup(sel != total) }
-                            .buttonStyle(.plain).font(.system(size: 11.5, weight: .medium)).foregroundStyle(Paper.accentSoft)
+                        Button(sel == removable && removable > 0 ? "Select none" : "Select all") {
+                            m.setAllCleanup(sel != removable)
+                        }
+                        .buttonStyle(.plain).font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(Paper.accentSoft).disabled(removable == 0)
                     }
                     .padding(.horizontal, 14).padding(.vertical, 8)
                     ScrollView {
-                        LazyVStack(spacing: 6) {
-                            ForEach(c!.labels) { label in
-                                LabelCleanRow(label: label, selected: c!.selected.contains(label.id)) {
-                                    m.toggleCleanup(label.id)
-                                }
-                            }
+                        LazyVStack(alignment: .leading, spacing: 6) {
+                            cleanGroup("Set by zero", "Category labels zero applies as it sorts your mail.", zero)
+                            cleanGroup("Your own labels", "Labels that were already on this account.", mine)
+                            cleanGroup("Gmail's own labels", "Built-in system labels — shown for reference, never removed.", gmail)
                         }
                         .padding(.horizontal, 12).padding(.bottom, 12)
                     }
@@ -2167,6 +2174,25 @@ private struct CleanupView: View {
             Text("Only labels are removed. No mail is deleted — every thread stays in All Mail and can be found there any time.")
         }
     }
+
+    // One titled group of labels (zero's / yours / Gmail's). Hidden when empty.
+    @ViewBuilder
+    private func cleanGroup(_ title: String, _ subtitle: String, _ items: [LabelInfo]) -> some View {
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(Paper.ink2)
+                Text(subtitle).font(.system(size: 10)).foregroundStyle(Paper.ink4)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 4).padding(.top, 8).padding(.bottom, 1)
+            ForEach(items) { label in
+                LabelCleanRow(label: label, selected: c?.selected.contains(label.id) ?? false) {
+                    m.toggleCleanup(label.id)
+                }
+            }
+        }
+    }
 }
 
 private struct LabelCleanRow: View {
@@ -2174,32 +2200,36 @@ private struct LabelCleanRow: View {
     let selected: Bool
     let toggle: () -> Void
     var body: some View {
-        Button(action: toggle) {
+        Button(action: { if !label.isSystem { toggle() } }) {
             HStack(spacing: 10) {
-                Image(systemName: selected ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 14)).foregroundStyle(selected ? Paper.accent : Paper.ink4)
-                Text(label.name).font(.system(size: 12.5)).foregroundStyle(Paper.ink).lineLimit(1)
-                if label.ours {
-                    Text("app").font(.system(size: 9, weight: .semibold)).foregroundStyle(Paper.accentSoft)
-                        .padding(.horizontal, 5).padding(.vertical, 1.5)
-                        .background(Capsule().fill(Paper.accentSoft.opacity(0.16)))
+                // System labels can't be removed: a lock stands in for the checkbox.
+                if label.isSystem {
+                    Image(systemName: "lock.fill").font(.system(size: 10))
+                        .foregroundStyle(Paper.ink4).frame(width: 14)
+                } else {
+                    Image(systemName: selected ? "checkmark.square.fill" : "square")
+                        .font(.system(size: 14)).foregroundStyle(selected ? Paper.accent : Paper.ink4)
                 }
-                if label.threads == 0 {
+                Text(label.name).font(.system(size: 12.5))
+                    .foregroundStyle(label.isSystem ? Paper.ink3 : Paper.ink).lineLimit(1)
+                if !label.isSystem && label.threads == 0 {
                     Text("empty").font(.system(size: 9, weight: .medium)).foregroundStyle(Paper.ink4)
                         .padding(.horizontal, 5).padding(.vertical, 1.5)
                         .background(Capsule().fill(Paper.hairline.opacity(0.12)))
                 }
                 Spacer(minLength: 6)
-                if label.threads > 0 {
+                if !label.isSystem && label.threads > 0 {
                     Text("\(label.threads)").font(.system(size: 11)).foregroundStyle(Paper.ink4).monospacedDigit()
                 }
             }
             .padding(.vertical, 8).padding(.horizontal, 11)
             .background(RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
-                .fill(selected ? Paper.accentSoft.opacity(0.10) : Paper.raised.opacity(0.04)))
+                .fill(selected ? Paper.accentSoft.opacity(0.10)
+                               : Paper.raised.opacity(label.isSystem ? 0.02 : 0.04)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .allowsHitTesting(!label.isSystem)
     }
 }
 

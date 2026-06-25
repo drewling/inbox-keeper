@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.8] - 2026-06-25
+
+### Changed
+
+- **"Clean up labels" now shows where each label came from.** Labels are grouped into three sections: the ones zero applies as it sorts, your own labels that were already on the account, and Gmail's built-in labels (shown for reference, with friendly names like "Promotions" rather than "CATEGORY_PROMOTIONS"). Gmail's own labels can't be selected or removed, and "Select all" only ever touches the removable ones, so it's clear at a glance what you would and wouldn't be removing.
+
 ## [1.6.7] - 2026-06-25
 
 ### Added

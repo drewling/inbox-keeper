@@ -659,7 +659,8 @@ final class KeeperModel: ObservableObject {
     }
     func setAllCleanup(_ on: Bool) {
         guard let labels = cleanup?.labels else { return }
-        cleanup?.selected = on ? Set(labels.map(\.id)) : []
+        // Never select Gmail's own labels — they can't be removed.
+        cleanup?.selected = on ? Set(labels.filter { !$0.isSystem }.map(\.id)) : []
     }
 
     /// Delete the selected labels. Reversible-safe: this removes labels only, never

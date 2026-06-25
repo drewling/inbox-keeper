@@ -245,14 +245,18 @@ struct LabelInfo: Decodable, Identifiable {
     var name = ""
     var threads = 0
     var ours = false
+    var kind = "user"          // "zero" | "user" | "system"
 
-    enum K: String, CodingKey { case id, name, threads, ours }
+    var isSystem: Bool { kind == "system" }
+
+    enum K: String, CodingKey { case id, name, threads, ours, kind }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)
         id = try c.decodeIfPresent(String.self, forKey: .id) ?? ""
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
         threads = try c.decodeIfPresent(Int.self, forKey: .threads) ?? 0
         ours = try c.decodeIfPresent(Bool.self, forKey: .ours) ?? false
+        kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? (ours ? "zero" : "user")
     }
 }
 
