@@ -65,6 +65,27 @@ if [[ ! -s "$NOTES_FILE" ]]; then
   exit 1
 fi
 
+# Append a standard install footer so every release carries Gatekeeper guidance
+# (zero is not yet Apple-notarized, so first launch needs the right-click/xattr step).
+cat >> "$NOTES_FILE" <<'FOOTER'
+
+## Installing
+
+Requires macOS 26 (Tahoe, Apple Silicon). zero is not yet notarized by Apple, so
+Gatekeeper warns on first launch — this is expected for a source-available app.
+
+1. Open the DMG and drag **zero** to your Applications folder.
+2. Right-click `zero.app` → **Open** → **Open** in the dialog. You only do this once.
+
+Or clear the quarantine flag from Terminal:
+
+```
+xattr -dr com.apple.quarantine /Applications/zero.app
+```
+
+Full setup (Google + Claude CLIs, first run) is in the [README](https://github.com/drewling/zero#install--first-run).
+FOOTER
+
 # ── 6. Create and push the tag ───────────────────────────────────────────────
 echo "==> Creating tag ${TAG}..."
 if git -C "$REPO_ROOT" rev-parse "$TAG" >/dev/null 2>&1; then

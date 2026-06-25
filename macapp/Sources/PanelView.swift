@@ -908,19 +908,31 @@ private struct IntelligenceSection: View {
                 }
                 .glassSurface(11)
 
-                // Active provider version note
-                if let active = ps.providers.first(where: { $0.active && $0.available }),
-                   let version = active.version {
-                    HStack(spacing: 6) {
+                // Connection status for the SELECTED provider, re-verified on every switch.
+                let selected = ps.providers.first(where: { $0.name == m.provider })
+                HStack(spacing: 6) {
+                    if m.verifyingProvider {
+                        ProgressView().controlSize(.small).scaleEffect(0.6)
+                            .frame(width: 12, height: 12)
+                        Text("Verifying \(selected?.label ?? m.provider)…")
+                            .font(.system(size: 11)).foregroundStyle(Paper.ink3)
+                    } else if let p = selected, p.available, let version = p.version {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 10)).foregroundStyle(Paper.accentSoft)
-                        Text("Connected to \(active.label) · \(version)")
+                        Text("Connected to \(p.label) · \(version)")
                             .font(.system(size: 11)).foregroundStyle(Paper.ink3)
-                        Spacer(minLength: 0)
+                    } else {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10)).foregroundStyle(Color.orange.opacity(0.9))
+                        Text("\(selected?.label ?? m.provider) not detected")
+                            .font(.system(size: 11)).foregroundStyle(Paper.ink3)
                     }
-                    .padding(.horizontal, 10).padding(.vertical, 7)
-                    .glassSurface(Radius.card)
+                    Spacer(minLength: 0)
                 }
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .glassSurface(Radius.card)
+                .animation(.easeOut(duration: 0.2), value: m.verifyingProvider)
+                .animation(.easeOut(duration: 0.2), value: m.provider)
             } else {
                 // Loading / unreachable
                 HStack(spacing: 9) {

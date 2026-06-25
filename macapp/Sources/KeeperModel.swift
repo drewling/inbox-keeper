@@ -84,6 +84,8 @@ final class KeeperModel: ObservableObject {
     @Published var notifyOnRun: Bool = true
     @Published var autoDraft: Bool = false
     @Published var provider: String = "claude"
+    // True while a just-switched provider is being re-verified against the server.
+    @Published var verifyingProvider: Bool = false
     @Published var labelArchivedDays: Int = 30
     // Provider availability — fetched alongside settings on panel open.
     @Published var providerStatus: ProviderStatus?
@@ -269,17 +271,23 @@ final class KeeperModel: ObservableObject {
     /// Switch to a different AI provider. The server validates that it's available; a
     /// 400 means the provider isn't installed — surface that as a toast.
     func saveProvider(_ name: String) {
+        guard name != provider else { return }
         let previous = provider
         provider = name
+        verifyingProvider = true
         Task {
             do {
                 let s = try await api.saveSettings(["provider": name])
                 provider = s.provider
+                // Re-verify: re-runs the server's CLI detection so the chip reflects
+                // the newly selected engine's real availability and version.
+                await fetchProviderStatus()
             } catch let KeeperAPI.KeeperError.http(_, msg) where !msg.isEmpty {
                 provider = previous; toast(msg)
             } catch {
                 provider = previous; toast("Couldn't switch provider")
             }
+            verifyingProvider = false
         }
     }
 

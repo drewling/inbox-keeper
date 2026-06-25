@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-06-25
+
+### Fixed
+
+- **The engine "Connected to" chip now follows the engine you select.** When you switched AI engine (for example Claude to Codex), the confirmation chip kept naming the previous engine, because it read the server's stale "active" flag rather than your selection. It now tracks the selected engine, shows a brief "Verifying…" state while it re-checks that the engine is installed and reachable, then confirms "Connected to <engine> · <version>" (or flags it as not detected). Switching engines is a no-op if you tap the one already selected.
+
 ## [1.6.1] - 2026-06-25
 
 ### Fixed
@@ -172,7 +178,8 @@ Initial public release.
 - Native macOS 26 Liquid Glass menu-bar app with a popover panel.
 - `.dmg` installer with guided onboarding for first-time setup.
 
-[Unreleased]: https://github.com/drewling/zero/compare/v1.6.1...HEAD
+[Unreleased]: https://github.com/drewling/zero/compare/v1.6.2...HEAD
+[1.6.2]: https://github.com/drewling/zero/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/drewling/zero/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/drewling/zero/compare/v1.5.1...v1.6.0
 [1.5.1]: https://github.com/drewling/zero/compare/v1.5.0...v1.5.1
