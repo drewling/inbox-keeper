@@ -512,6 +512,9 @@ private struct AccountsView: View {
         } else {
             ScrollView {
                 VStack(spacing: 8) {
+                    // Sort / backlog jobs are triggered from here, so show their live
+                    // progress here too (not only on Open loops).
+                    if m.isWorkingInline { TidyingBanner(message: m.job?.message ?? "Working…") }
                     ForEach(accts) { a in AccountCard(account: a) }
                     Button { m.addAccount() } label: {
                         Label("Add a Gmail account", systemImage: "plus").frame(maxWidth: .infinity)
@@ -541,6 +544,16 @@ private struct AccountCard: View {
                 Text("open").font(.system(size: 10)).foregroundStyle(Paper.ink4)
             }
             Menu {
+                // Two distinct, opposite operations — kept clearly apart so neither
+                // gets mistaken for the other. Sort *adds* category labels; clean up
+                // *removes* them.
+                Menu {
+                    Button("Last 7 days")  { m.populateLabels(slug: account.slug, windowDays: 7) }
+                    Button("Last 30 days") { m.populateLabels(slug: account.slug, windowDays: 30) }
+                    Button("Last 90 days") { m.populateLabels(slug: account.slug, windowDays: 90) }
+                } label: { Label("Sort recent mail into labels", systemImage: "sparkles") }
+                .disabled(m.isBusy)
+                Divider()
                 Button { m.openCleanup(account) } label: { Label("Clean up labels…", systemImage: "tag.slash") }
             } label: {
                 Image(systemName: "ellipsis").font(.system(size: 13, weight: .semibold))
@@ -2044,7 +2057,6 @@ private struct FormatBar: View {
 private struct CleanupView: View {
     @EnvironmentObject var m: KeeperModel
     @State private var confirming = false
-    @State private var sortWindow = 30
     private var c: CleanupState? { m.cleanup }
 
     var body: some View {
@@ -2111,29 +2123,6 @@ private struct CleanupView: View {
                     }
                     .frame(maxHeight: 280)
                 }
-
-                // Sort recent mail into category labels (label-only backfill — never
-                // archives). Light: skips already-labeled + handled threads server-side.
-                HStack(spacing: 8) {
-                    Image(systemName: "sparkles").font(.system(size: 11)).foregroundStyle(Paper.accentSoft)
-                    Text("Sort the last").font(.system(size: 11.5)).foregroundStyle(Paper.ink3)
-                    Picker("", selection: $sortWindow) {
-                        Text("7 days").tag(7)
-                        Text("30 days").tag(30)
-                        Text("90 days").tag(90)
-                    }
-                    .pickerStyle(.menu).labelsHidden().fixedSize().controlSize(.small)
-                    Text("into labels").font(.system(size: 11.5)).foregroundStyle(Paper.ink3)
-                    Spacer(minLength: 6)
-                    Button {
-                        guard let slug = c?.slug else { return }
-                        m.populateLabels(slug: slug, windowDays: sortWindow)
-                        m.closeCleanup()
-                    } label: { Text("Sort recent mail") }
-                    .buttonStyle(GhostButtonStyle()).disabled(m.isBusy)
-                }
-                .padding(.horizontal, 14).padding(.vertical, 9)
-                .overlay(alignment: .top) { Rectangle().fill(Paper.hairline.opacity(0.1)).frame(height: 0.5) }
 
                 // Footer
                 HStack(spacing: 9) {

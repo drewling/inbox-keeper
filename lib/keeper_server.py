@@ -265,8 +265,16 @@ def _run_populate(payload):
         _set_job_message(f"Labeled {labeled} so far…")
     _set_job_message(f"Labeled {labeled} recent thread{'' if labeled == 1 else 's'}")
     _build_state_blocking()
+    # Partial success is success: report what got labeled and how many accounts
+    # couldn't be reached, rather than discarding the whole run. Only a total
+    # failure (nothing labeled) is a hard error.
+    if failures and labeled == 0:
+        raise RuntimeError(failures[0][:200])
     if failures:
-        raise RuntimeError("Some accounts failed: " + " | ".join(failures))
+        n = len(failures)
+        _set_job_message(
+            f"Labeled {labeled} recent thread{'' if labeled == 1 else 's'} · "
+            f"{n} account{'' if n == 1 else 's'} couldn't be reached")
 
 
 def _run_archive_before(payload):
@@ -289,8 +297,14 @@ def _run_archive_before(payload):
         _set_job_message(f"Archived {archived} so far…")
     _set_job_message(f"Archived {archived} older thread{'' if archived == 1 else 's'}")
     _build_state_blocking()
+    # Partial success is success (see _run_populate): only a total failure raises.
+    if failures and archived == 0:
+        raise RuntimeError(failures[0][:200])
     if failures:
-        raise RuntimeError("Some accounts failed: " + " | ".join(failures))
+        n = len(failures)
+        _set_job_message(
+            f"Archived {archived} older thread{'' if archived == 1 else 's'} · "
+            f"{n} account{'' if n == 1 else 's'} couldn't be reached")
 
 
 def _run_undo(payload):

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.6] - 2026-06-25
+
+### Changed
+
+- **"Sort recent mail" and "Clean up labels" are now two separate actions.** They were crammed into one sheet, which was confusing because they do opposite things: sorting *adds* category labels to recent mail, cleaning up *removes* them. Sorting is now its own item in the account's menu (pick the last 7, 30, or 90 days); cleaning up labels stays a focused sheet that only removes labels.
+- **Honest, consistent status for sorting and backlog clearing.** If one account couldn't be reached, the job no longer fails wholesale and throws away what it did. It now reports the real outcome ("Labeled 42 recent threads · 1 account couldn't be reached"), the same way label removal already reported partial results, and only treats it as a failure when nothing at all succeeded. Progress for these jobs now also shows on the Accounts tab where they're started, not only on Open loops.
+
+### Fixed
+
+- **More robust label and sort internals.** Replaced guard-then-force-unwrap patterns in the optimistic UI updates with safe optional access, so a state change mid-operation can't trip a fatal unwrap.
+
 ## [1.6.5] - 2026-06-25
 
 ### Added

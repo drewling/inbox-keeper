@@ -543,7 +543,7 @@ final class KeeperModel: ObservableObject {
 
     func dismiss(_ row: LoopRow) {
         let loop = row.loop, slug = row.account.slug
-        if state != nil { state!.dropLoop(slug: slug, threadId: loop.threadId) }   // optimistic
+        state?.dropLoop(slug: slug, threadId: loop.threadId)   // optimistic
         Task {
             do {
                 let label = try await api.dismiss(loop, slug: slug)
@@ -558,7 +558,7 @@ final class KeeperModel: ObservableObject {
     }
 
     private func restoreThread(_ loop: Loop, slug: String, label: String) {
-        if state != nil { state!.readdLoop(slug: slug, loop: loop) }
+        state?.readdLoop(slug: slug, loop: loop)
         Task {
             try? await api.restoreThread(loop, slug: slug, label: label)
             await reload()   // reflect the decremented Undo bucket
@@ -644,12 +644,13 @@ final class KeeperModel: ObservableObject {
     }
 
     func toggleCleanup(_ id: String) {
-        guard cleanup != nil else { return }
-        if cleanup!.selected.contains(id) { cleanup!.selected.remove(id) } else { cleanup!.selected.insert(id) }
+        guard var sel = cleanup?.selected else { return }
+        if sel.contains(id) { sel.remove(id) } else { sel.insert(id) }
+        cleanup?.selected = sel
     }
     func setAllCleanup(_ on: Bool) {
-        guard cleanup != nil else { return }
-        cleanup!.selected = on ? Set(cleanup!.labels.map(\.id)) : []
+        guard let labels = cleanup?.labels else { return }
+        cleanup?.selected = on ? Set(labels.map(\.id)) : []
     }
 
     /// Delete the selected labels. Reversible-safe: this removes labels only, never
@@ -744,7 +745,7 @@ final class KeeperModel: ObservableObject {
                                    toEmail: composerToEmail, subject: composerSubject,
                                    body: text, html: body, original: composerOriginal)
                 Haptic.tap()
-                if state != nil { state!.dropLoop(slug: row.account.slug, threadId: row.loop.threadId) }
+                state?.dropLoop(slug: row.account.slug, threadId: row.loop.threadId)
                 // Moment 7: show the sent checkmark briefly, then close.
                 sentConfirmation = true
                 try? await Task.sleep(nanoseconds: 800_000_000)
