@@ -335,6 +335,78 @@ def _run_undo(payload):
     _build_state_blocking()
 
 
+def _display_from(raw):
+    """'Jane Doe <jane@x.com>' -> 'Jane Doe'; bare address -> the address."""
+    raw = (raw or "").strip()
+    if "<" in raw:
+        name = raw.split("<", 1)[0].strip().strip('"')
+        return name or raw.split("<", 1)[1].rstrip(">").strip()
+    return raw
+
+
+def _undo_threads(payload):
+    """List the actual emails under one recovery label (newest first, capped) with
+    enough metadata for the Undo tab to show them. Metadata is fetched concurrently
+    so a batch loads in a couple of seconds even at the cap."""
+    sys.path.insert(0, HERE)
+    import draftutil as du  # noqa: E402
+    slug = payload.get("slug")
+    label_name = payload.get("label")
+    if not slug or not label_name:
+        raise ValueError("need slug and label")
+    limit = max(1, min(int(payload.get("limit", 40)), 100))
+    cfg = _acct(slug)["config_dir"]
+    lid = _find_label(cfg, label_name)
+    if not lid:
+        return {"threads": []}
+    d = du._gws(cfg, ["gmail", "users", "messages", "list",
+                      "--params", json.dumps({"userId": "me", "labelIds": [lid],
+                                              "maxResults": limit})])
+    ids = [m["id"] for m in d.get("messages", []) or []]
+
+    def _meta(mid):
+        try:
+            m = du._gws(cfg, ["gmail", "users", "messages", "get",
+                              "--params", json.dumps({"userId": "me", "id": mid, "format": "metadata",
+                                                      "metadataHeaders": ["From", "Subject"]})])
+            h = {x.get("name", "").lower(): x.get("value", "")
+                 for x in m.get("payload", {}).get("headers", [])}
+            return {"id": mid, "thread_id": m.get("threadId", mid),
+                    "subject": (h.get("subject", "") or "(no subject)"),
+                    "sender": _display_from(h.get("from", "")),
+                    "epoch": int(m.get("internalDate", "0") or 0) // 1000}
+        except Exception:
+            return None
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        threads = [r for r in ex.map(_meta, ids) if r]
+    threads.sort(key=lambda t: t["epoch"], reverse=True)
+    return {"threads": threads}
+
+
+def _undo_thread(payload):
+    """Restore a single message from a recovery label back to the inbox (per-email
+    undo). Fast + synchronous so the panel can drop the row immediately."""
+    sys.path.insert(0, HERE)
+    import draftutil as du  # noqa: E402
+    import learning  # noqa: E402
+    slug = payload.get("slug")
+    label_name = payload.get("label")
+    mid = payload.get("id")
+    if not (slug and label_name and mid):
+        raise ValueError("need slug, label, id")
+    cfg = _acct(slug)["config_dir"]
+    lid = _find_label(cfg, label_name)
+    du._gws(cfg, ["gmail", "users", "messages", "modify",
+                  "--params", json.dumps({"userId": "me", "id": mid}),
+                  "--json", json.dumps({"addLabelIds": ["INBOX"],
+                                        "removeLabelIds": [lid] if lid else []})],
+            allow_empty=True)
+    learning.record({"type": "keep_override_undo", "account": slug,
+                     "thread_id": payload.get("thread_id", mid)})
+    return {"ok": True}
+
+
 def _dismiss(payload):
     """Set one loop aside: archive its whole thread reversibly and record that the
     user chose to archive rather than reply (a learning signal). Fast + synchronous
@@ -1411,6 +1483,8 @@ class Handler(BaseHTTPRequestHandler):
         # Fast synchronous endpoints (one thread / one model call), not the job slot.
         _sync = {"/api/dismiss": _dismiss, "/api/draft": _gen_draft,
                  "/api/draft/send": _send_draft,
+                 "/api/undo/threads": _undo_threads,
+                 "/api/undo/thread": _undo_thread,
                  "/api/set-credentials": _set_client_credentials}
         if p in _sync:
             try:

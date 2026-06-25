@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.4] - 2026-06-25
+
+### Added
+
+- **The Undo tab shows the actual emails now.** Each day's set-aside mail is a batch you can open to see the real emails inside (sender, subject, and when), and put any single one back in the inbox with one tap, alongside the existing "Restore all". The emails load on demand when you open a batch; large batches show the most recent with a clear count of how many more "Restore all" would recover.
+
 ## [1.6.3] - 2026-06-25
 
 ### Changed
@@ -184,7 +190,8 @@ Initial public release.
 - Native macOS 26 Liquid Glass menu-bar app with a popover panel.
 - `.dmg` installer with guided onboarding for first-time setup.
 
-[Unreleased]: https://github.com/drewling/zero/compare/v1.6.3...HEAD
+[Unreleased]: https://github.com/drewling/zero/compare/v1.6.4...HEAD
+[1.6.4]: https://github.com/drewling/zero/compare/v1.6.3...v1.6.4
 [1.6.3]: https://github.com/drewling/zero/compare/v1.6.2...v1.6.3
 [1.6.2]: https://github.com/drewling/zero/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/drewling/zero/compare/v1.6.0...v1.6.1

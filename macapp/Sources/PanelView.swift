@@ -546,13 +546,13 @@ private struct UndoView: View {
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Nothing is ever deleted. Each point restores a day's set-aside threads back to the inbox in one tap.")
+                    Text("Nothing is ever deleted. Open a day to see the emails it set aside, and put any of them back in one tap.")
                         .font(.system(size: 12)).foregroundStyle(Paper.ink3)
                         .padding(.horizontal, 4).padding(.bottom, 4)
                     // Key on position: an undo point's label/date can repeat across
                     // accounts, so \.point.id alone collides and SwiftUI duplicates rows.
                     ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                        UndoRow(point: item.point, account: item.account)
+                        UndoBatch(point: item.point, account: item.account)
                     }
                 }
                 .padding(.horizontal, 14).padding(.vertical, 14)
@@ -561,22 +561,109 @@ private struct UndoView: View {
     }
 }
 
-private struct UndoRow: View {
+// A recovery batch (one day's set-aside mail for one account). Tapping the header
+// expands it to list the actual emails, each individually restorable.
+private struct UndoBatch: View {
     @EnvironmentObject var m: KeeperModel
     let point: UndoPoint; let account: Account
+    @State private var expanded = false
+
+    private var key: String { m.undoKey(account.slug, point.label) }
+    private var restored: Int { m.undoRestored[key] ?? 0 }
+    private var remaining: Int { max(0, point.count - restored) }
+    private var loaded: [UndoThread] { m.undoThreads[key] ?? [] }
+    private var loading: Bool { m.undoLoading.contains(key) }
+
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(point.count) \(point.count == 1 ? "thread" : "threads") set aside")
-                    .font(.system(size: 13, weight: .medium))
-                Text("\(account.email) · \(point.date)").font(.system(size: 11.5)).foregroundStyle(Paper.ink3)
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeOut(duration: 0.22)) { expanded.toggle() }
+                if expanded { m.loadUndoThreads(slug: account.slug, label: point.label) }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(Paper.ink3)
+                        .rotationEffect(.degrees(expanded ? 90 : 0)).frame(width: 12)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(Self.prettyDate(point.date)).font(.system(size: 13, weight: .medium))
+                        Text("\(remaining) set aside · \(account.email)")
+                            .font(.system(size: 11.5)).foregroundStyle(Paper.ink3)
+                    }
+                    Spacer(minLength: 6)
+                    Button("Restore all") { m.undo(point, slug: account.slug) }
+                        .buttonStyle(GhostButtonStyle()).disabled(m.isBusy)
+                }
+                .contentShape(Rectangle())
             }
-            Spacer()
-            Button("Restore") { m.undo(point, slug: account.slug) }
-                .buttonStyle(GhostButtonStyle()).disabled(m.isBusy)
+            .buttonStyle(.plain)
+
+            if expanded {
+                Rectangle().fill(Paper.hairline.opacity(0.12)).frame(height: 0.5)
+                    .padding(.top, 10).padding(.bottom, 2)
+                if loading {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small).scaleEffect(0.7)
+                        Text("Loading emails…").font(.system(size: 12)).foregroundStyle(Paper.ink3)
+                    }.padding(.vertical, 8)
+                } else if loaded.isEmpty {
+                    Text("No emails to show here.")
+                        .font(.system(size: 12)).foregroundStyle(Paper.ink3).padding(.vertical, 8)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(loaded) { t in
+                            UndoEmailRow(thread: t) {
+                                m.restoreThread(slug: account.slug, label: point.label, thread: t)
+                            }
+                        }
+                    }
+                    if point.count > loaded.count {
+                        Text("Showing the \(loaded.count) most recent of \(point.count). Restore all to recover the rest.")
+                            .font(.system(size: 11)).foregroundStyle(Paper.ink3)
+                            .padding(.top, 6)
+                    }
+                }
+            }
         }
         .padding(12)
         .glassSurface(12)
+    }
+
+    /// "2026-06-24" -> "Wed 24 Jun"; "earlier" -> "Earlier".
+    static func prettyDate(_ raw: String) -> String {
+        guard raw != "earlier" else { return "Earlier" }
+        let inFmt = DateFormatter(); inFmt.dateFormat = "yyyy-MM-dd"
+        guard let d = inFmt.date(from: raw) else { return raw }
+        let out = DateFormatter(); out.dateFormat = "EEE d MMM"
+        return out.string(from: d)
+    }
+}
+
+private struct UndoEmailRow: View {
+    let thread: UndoThread
+    let restore: () -> Void
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(thread.subject.isEmpty ? "(no subject)" : thread.subject)
+                    .font(.system(size: 12.5)).lineLimit(1)
+                Text(senderLine).font(.system(size: 11)).foregroundStyle(Paper.ink3).lineLimit(1)
+            }
+            Spacer(minLength: 6)
+            Button(action: restore) {
+                Image(systemName: "tray.and.arrow.up")
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(Paper.accentSoft)
+                    .frame(width: 28, height: 26).glassSurface(7, interactive: true)
+            }
+            .buttonStyle(.plain).help("Put this email back in the inbox")
+        }
+        .padding(.vertical, 7)
+    }
+
+    private var senderLine: String {
+        guard thread.epoch > 0 else { return thread.sender }
+        let f = RelativeDateTimeFormatter(); f.unitsStyle = .abbreviated
+        let when = f.localizedString(for: Date(timeIntervalSince1970: TimeInterval(thread.epoch)), relativeTo: Date())
+        return thread.sender.isEmpty ? when : "\(thread.sender) · \(when)"
     }
 }
 

@@ -180,6 +180,26 @@ struct UndoPoint: Decodable, Identifiable {
     }
 }
 
+/// One archived email under a recovery label, shown in the Undo tab so a batch
+/// can be browsed and individual emails un-archived. Fetched on demand.
+struct UndoThread: Decodable, Identifiable {
+    var id = ""          // message id (unique per row)
+    var threadId = ""
+    var subject = "(no subject)"
+    var sender = ""
+    var epoch = 0
+
+    enum K: String, CodingKey { case id, threadId, subject, sender, epoch }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: K.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? ""
+        threadId = try c.decodeIfPresent(String.self, forKey: .threadId) ?? id
+        subject = try c.decodeIfPresent(String.self, forKey: .subject) ?? "(no subject)"
+        sender = try c.decodeIfPresent(String.self, forKey: .sender) ?? ""
+        epoch = try c.decodeIfPresent(Int.self, forKey: .epoch) ?? 0
+    }
+}
+
 struct Job: Decodable {
     var id = 0
     var kind: String?
@@ -342,6 +362,19 @@ struct KeeperAPI {
     @discardableResult func run() async throws -> Int { try await startJob("/api/run", ["grace_days": 0]) }
     @discardableResult func undo(slug: String, label: String) async throws -> Int {
         try await startJob("/api/undo", ["slug": slug, "label": label])
+    }
+
+    /// The actual emails under one recovery label (capped, newest first).
+    func undoThreads(slug: String, label: String, limit: Int = 40) async throws -> [UndoThread] {
+        struct W: Decodable { var threads: [UndoThread] = [] }
+        let w: W = try await post("/api/undo/threads", ["slug": slug, "label": label, "limit": limit], timeout: 60)
+        return w.threads
+    }
+
+    /// Un-archive a single email from a recovery label.
+    func undoThread(slug: String, label: String, id: String, threadId: String) async throws {
+        _ = try await postRaw("/api/undo/thread",
+                              ["slug": slug, "label": label, "id": id, "thread_id": threadId])
     }
     @discardableResult func addAccount() async throws -> Int { try await startJob("/api/add-account", [:]) }
     @discardableResult func refresh() async throws -> Int { try await startJob("/api/refresh", [:]) }

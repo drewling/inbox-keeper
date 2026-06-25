@@ -89,6 +89,10 @@ final class KeeperModel: ObservableObject {
     @Published var labelArchivedDays: Int = 30
     // Provider availability — fetched alongside settings on panel open.
     @Published var providerStatus: ProviderStatus?
+    // Undo tab: emails under each recovery batch, loaded on demand. Keyed "slug|label".
+    @Published var undoThreads: [String: [UndoThread]] = [:]
+    @Published var undoLoading: Set<String> = []
+    @Published var undoRestored: [String: Int] = [:]   // per-batch count restored this session
     // First-run backlog offer: shown once after the first inbox connects.
     @Published var backlogOffered: Bool = UserDefaults.standard.bool(forKey: "backlogOffered")
 
@@ -381,6 +385,37 @@ final class KeeperModel: ObservableObject {
     }
     func undo(_ point: UndoPoint, slug: String) {
         beginJob(kind: "undo", starting: "Restoring…") { try await self.api.undo(slug: slug, label: point.label) }
+    }
+
+    func undoKey(_ slug: String, _ label: String) -> String { slug + "|" + label }
+
+    /// Lazily load the emails in one recovery batch (once). Idempotent.
+    func loadUndoThreads(slug: String, label: String) {
+        let key = undoKey(slug, label)
+        guard undoThreads[key] == nil, !undoLoading.contains(key) else { return }
+        undoLoading.insert(key)
+        Task {
+            let list = (try? await api.undoThreads(slug: slug, label: label)) ?? []
+            undoThreads[key] = list
+            undoLoading.remove(key)
+        }
+    }
+
+    /// Un-archive a single email from a batch. Optimistic: drop the row immediately.
+    func restoreThread(slug: String, label: String, thread: UndoThread) {
+        let key = undoKey(slug, label)
+        undoThreads[key]?.removeAll { $0.id == thread.id }
+        undoRestored[key, default: 0] += 1
+        Haptic.tap()
+        Task {
+            do { try await api.undoThread(slug: slug, label: label, id: thread.id, threadId: thread.threadId) }
+            catch {
+                // Put it back so the user isn't misled into thinking it was restored.
+                undoThreads[key, default: []].append(thread)
+                undoRestored[key, default: 0] -= 1
+                toast("Couldn't restore that email")
+            }
+        }
     }
     func addAccount() {
         beginJob(kind: "add_account", starting: "Opening your browser…") { try await self.api.addAccount() }
