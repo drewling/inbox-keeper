@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.10] - 2026-06-25
+
+### Added
+
+- **Drafting preferences in Settings.** A new "Drafting" section lets you set the name zero signs your replies with (leave it blank to keep using each account's own name), and a free-form "house style" zero follows in every draft it writes: tone, length, sign-off, spelling, whatever you want. These apply across all accounts, on top of the voice zero already learns from your sent mail.
+
 ## [1.6.9] - 2026-06-25
 
 ### Changed

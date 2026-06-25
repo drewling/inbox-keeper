@@ -739,6 +739,7 @@ private struct PolicyView: View {
                 CategoriesSection()
                 DailyRoutineSection()
                 IntelligenceSection()
+                DraftingSection()
                 LearnedSection()
             }
             .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 18)
@@ -775,6 +776,49 @@ private struct KeepPolicySection: View {
                 .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Paper.sunken.opacity(0.24))
                     .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Paper.hairline.opacity(0.12), lineWidth: 0.5)))
             HStack { Spacer(); Button("Save") { m.savePolicy() }.buttonStyle(GhostButtonStyle()) }
+        }
+    }
+}
+
+// MARK: Drafting preferences
+
+// General preferences the reply drafter honors: the name to sign as, and a free-form
+// house style. Persisted globally (settings.json); the name is optional and falls back
+// to each account's own name when blank.
+private struct DraftingSection: View {
+    @EnvironmentObject var m: KeeperModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SettingsHeader("Drafting",
+                           "How zero writes replies for you. Leave the name blank to use each account's own name.")
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Sign replies as").font(.system(size: 12.5)).foregroundStyle(Paper.ink2)
+                TextField("Each account's own name", text: $m.draftName)
+                    .textFieldStyle(.plain).font(.system(size: 12.5)).foregroundStyle(Paper.ink)
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Paper.sunken.opacity(0.24))
+                        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Paper.hairline.opacity(0.12), lineWidth: 0.5)))
+                    .onSubmit { m.saveDraftName(m.draftName) }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("House style").font(.system(size: 12.5)).foregroundStyle(Paper.ink2)
+                TextEditor(text: $m.draftGuidance)
+                    .font(.system(size: 12.5)).foregroundStyle(Paper.ink)
+                    .scrollContentBackground(.hidden).frame(minHeight: 80).padding(10)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Paper.sunken.opacity(0.24))
+                        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Paper.hairline.opacity(0.12), lineWidth: 0.5)))
+                Text("Notes zero follows in every draft — tone, length, sign-off, anything. e.g. \"Keep it under four sentences, British spelling, no exclamation marks.\"")
+                    .font(.system(size: 11)).foregroundStyle(Paper.ink4)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack {
+                Spacer()
+                Button("Save") { m.saveDraftName(m.draftName); m.saveDraftGuidance(m.draftGuidance) }
+                    .buttonStyle(GhostButtonStyle())
+            }
         }
     }
 }

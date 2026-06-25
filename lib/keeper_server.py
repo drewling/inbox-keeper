@@ -779,8 +779,12 @@ def _gen_draft(payload):
         raise ValueError("draft requires slug and thread_id")
     acct = _acct(slug)
     cfg = acct["config_dir"]
-    owner_name = (acct.get("name") or _name_from_email(acct.get("email", ""))).strip()
+    settings = _read_settings()
+    # A user-set drafting name overrides the per-account derived name (blank = derive).
+    owner_name = ((settings.get("draft_name") or "").strip()
+                  or acct.get("name") or _name_from_email(acct.get("email", ""))).strip()
     owner_first = owner_name.split()[0] if owner_name else ""
+    draft_guidance = (settings.get("draft_guidance") or "").strip()
     t = du._gws(cfg, ["gmail", "users", "threads", "get",
                       "--params", json.dumps({"userId": "me", "id": tid, "format": "metadata",
                                               "metadataHeaders": ["From", "Subject", "Date"]})])
@@ -870,6 +874,9 @@ def _gen_draft(payload):
 
     voice_desc = f"{owner_name}'s voice" if owner_name else "the user's voice"
     sign = f' Sign off as "{owner_first}".' if owner_first else ""
+    # User's own house style takes priority over inferred tone.
+    guidance_block = (f"\nHOUSE STYLE (the user's own preferences — follow these "
+                      f"over any inferred tone):\n{draft_guidance}\n") if draft_guidance else ""
 
     prompt = (
         f"Draft a reply in {voice_desc} to the email thread below.\n"
@@ -883,7 +890,7 @@ def _gen_draft(payload):
         "logistics, question/decision, thanks, intro, etc.) and write the way the "
         "owner typically handles that kind — see the exemplars below for cues\n"
         f"- Reply is addressed to: {to_name}.{tier_note}\n"
-        f"{prof_block}{exemplar_block}{voice_block}"
+        f"{guidance_block}{prof_block}{exemplar_block}{voice_block}"
         + (f"\nADJUSTMENT requested: {steer}\n" if steer else "")
         + f"\nSubject: {subject}\nThread (oldest to newest):\n" + "\n".join(convo[-8:])
         + "\n\nOutput ONLY the reply body text, no preamble, no subject line."
@@ -1282,6 +1289,9 @@ _DEFAULT_SETTINGS = {
     "label_archived_days": 30,
     # LLM provider (see lib/llm.py)
     "provider": "claude",
+    # Drafting preferences (used by the reply drafter, _gen_draft)
+    "draft_name": "",        # how to sign drafts; blank = derive from the account
+    "draft_guidance": "",    # free-form house style fed into every draft prompt
 }
 
 
@@ -1754,6 +1764,20 @@ class Handler(BaseHTTPRequestHandler):
                         errors.append(f"provider '{prov}' is not available on this system")
                     else:
                         validated["provider"] = prov
+            # draft_name: optional signing name override (blank = derive per account)
+            dn = payload.get("draft_name")
+            if dn is not None:
+                if not isinstance(dn, str) or len(dn) > 80:
+                    errors.append("draft_name must be a string up to 80 chars")
+                else:
+                    validated["draft_name"] = dn.strip()
+            # draft_guidance: optional free-form house style
+            dg = payload.get("draft_guidance")
+            if dg is not None:
+                if not isinstance(dg, str) or len(dg) > 600:
+                    errors.append("draft_guidance must be a string up to 600 chars")
+                else:
+                    validated["draft_guidance"] = dg.strip()
             if errors:
                 return self._send(400, {"error": "; ".join(errors)})
             if not validated:

@@ -86,6 +86,9 @@ final class KeeperModel: ObservableObject {
     // True while a just-switched provider is being re-verified against the server.
     @Published var verifyingProvider: Bool = false
     @Published var labelArchivedDays: Int = 30
+    // Drafting preferences (name to sign as + free-form house style).
+    @Published var draftName: String = ""
+    @Published var draftGuidance: String = ""
     // Provider availability — fetched alongside settings on panel open.
     @Published var providerStatus: ProviderStatus?
     // Undo tab: emails under each recovery batch, loaded on demand. Keyed "slug|label".
@@ -226,6 +229,8 @@ final class KeeperModel: ObservableObject {
         autoDraft = s.autoDraft
         provider = s.provider
         labelArchivedDays = s.labelArchivedDays
+        draftName = s.draftName
+        draftGuidance = s.draftGuidance
     }
 
     /// Persist the grace window; honored by the next keeper run.
@@ -274,6 +279,25 @@ final class KeeperModel: ObservableObject {
         Task {
             do { try await api.saveSettings(["label_archived_days": n]) }
             catch { toast("Couldn't save label setting") }
+        }
+    }
+
+    /// Persist drafting preferences (called when the fields commit, not per keystroke).
+    func saveDraftName(_ s: String) {
+        let v = String(s.prefix(80))
+        draftName = v
+        Task {
+            do { _ = try await api.saveSettings(["draft_name": v]) }
+            catch { toast("Couldn't save drafting name") }
+        }
+    }
+
+    func saveDraftGuidance(_ s: String) {
+        let v = String(s.prefix(600))
+        draftGuidance = v
+        Task {
+            do { _ = try await api.saveSettings(["draft_guidance": v]) }
+            catch { toast("Couldn't save drafting notes") }
         }
     }
 
