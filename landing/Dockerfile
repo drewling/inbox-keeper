@@ -1,5 +1,7 @@
 FROM nginx:alpine
 COPY index.html /usr/share/nginx/html/index.html
+COPY privacy.html /usr/share/nginx/html/privacy.html
+COPY terms.html /usr/share/nginx/html/terms.html
 COPY og.png /usr/share/nginx/html/og.png
 COPY robots.txt /usr/share/nginx/html/robots.txt
 COPY sitemap.xml /usr/share/nginx/html/sitemap.xml

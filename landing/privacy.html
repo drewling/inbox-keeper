@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privacy — zero</title>
+<meta name="description" content="How zero handles your email and Google account data. Short version: it runs on your Mac, on your own keys, and sends nothing to us — because there is no us to send it to.">
+<link rel="canonical" href="https://zero.headless.com/privacy.html">
+<meta name="theme-color" content="#0a0b0d">
+<meta name="color-scheme" content="dark">
+<meta name="robots" content="index, follow">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='2' y='2' width='60' height='60' rx='15' fill='%234285F4'/%3E%3Cpath d='M18 34L28.5 44.5L48 19.5' fill='none' stroke='%23ffffff' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg:        oklch(9.5%  0.006 255);
+    --surface:   oklch(14.5% 0.009 255);
+    --hairline:  oklch(100% 0 0 / 0.09);
+    --text:      oklch(95%   0.004 255);
+    --text-2:    oklch(72%   0.009 255);
+    --text-3:    oklch(60%   0.009 255);
+    --accent:    oklch(74%   0.135 250);
+    --green:     oklch(76%   0.16  158);
+    --max: 720px;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    background: var(--bg); color: var(--text-2);
+    font-family: var(--font); line-height: 1.65;
+    font-size: 1.0625rem; letter-spacing: -0.011em;
+    padding: 0 1.5rem; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: var(--max); margin: 0 auto; padding: clamp(3rem, 8vw, 6rem) 0 5rem; }
+  .brand { display: inline-flex; align-items: center; gap: 0.55rem; color: var(--text); font-weight: 600; font-size: 1.0625rem; letter-spacing: -0.03em; text-decoration: none; margin-bottom: 3rem; }
+  .brand svg { width: 26px; height: 26px; }
+  h1 { color: var(--text); font-size: clamp(1.9rem, 5vw, 2.5rem); font-weight: 600; letter-spacing: -0.035em; line-height: 1.1; margin-bottom: 0.6rem; }
+  .updated { color: var(--text-3); font-family: var(--mono); font-size: 0.8125rem; margin-bottom: 2.5rem; }
+  h2 { color: var(--text); font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; margin: 2.75rem 0 0.9rem; }
+  p { margin-bottom: 1.1rem; }
+  ul { margin: 0 0 1.1rem 1.1rem; }
+  li { margin-bottom: 0.5rem; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  strong { color: var(--text); font-weight: 600; }
+  code { font-family: var(--mono); font-size: 0.875em; background: var(--surface); padding: 0.1em 0.4em; border-radius: 5px; color: var(--text); }
+  .tldr { background: var(--surface); border: 1px solid var(--hairline); border-radius: 14px; padding: 1.5rem 1.6rem; margin-bottom: 2.5rem; }
+  .tldr h2 { margin-top: 0; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-3); }
+  .tldr ul { margin-bottom: 0; }
+  .tldr li::marker { color: var(--green); }
+  hr { border: none; border-top: 1px solid var(--hairline); margin: 3rem 0; }
+  footer { color: var(--text-3); font-size: 0.875rem; }
+  footer a { color: var(--text-2); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="brand" href="/">
+    <svg viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="15" fill="#4285F4"/><path d="M18 34L28.5 44.5L48 19.5" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    zero
+  </a>
+
+  <h1>Privacy</h1>
+  <p class="updated">Last updated 26 June 2026</p>
+
+  <div class="tldr">
+    <h2>The short version</h2>
+    <ul>
+      <li>zero runs entirely on your Mac, signed in with <strong>your own</strong> Google account and AI provider.</li>
+      <li>There is no zero server, no zero account, and no analytics. We never receive your email — there is nowhere for it to go.</li>
+      <li>Your mail is read and sorted on your machine. To judge a thread, its text is sent to the AI assistant you choose (Claude by default), under that provider's terms — the same as if you'd pasted it in yourself.</li>
+      <li>zero only ever asks Google for Gmail access and your basic identity. Nothing else.</li>
+      <li>Nothing is sold, shared for ads, or used to train anything.</li>
+    </ul>
+  </div>
+
+  <p>zero is a macOS menu-bar app that reads your Gmail each day, keeps the threads that still need a reply, and archives the rest — reversibly, never deleting. This page explains exactly what it touches and where that data goes. It's short because zero's design is simple: everything happens on your computer.</p>
+
+  <h2>Who runs zero</h2>
+  <p>zero is made by Tayo Onabule (Drewl). It is a downloadable desktop app, not a hosted service. When we say "we," we mean the people who write the code — not an operator sitting between you and your mail, because there isn't one.</p>
+
+  <h2>What zero connects to</h2>
+  <p>When you add an account, zero signs you in through Google's standard OAuth screen and requests only these permissions:</p>
+  <ul>
+    <li><strong>Gmail (read &amp; modify)</strong> — <code>gmail.modify</code>. This lets zero read your threads to judge them, archive a thread (by removing its <em>Inbox</em> label), apply your category labels, and — only when you ask — create and send a reply draft. It is the single scope that covers everything zero does with mail. zero never permanently deletes a message; archiving is a label change you can undo with one Gmail search.</li>
+    <li><strong>Your identity</strong> — <code>openid</code>, <code>userinfo.email</code>, and <code>userinfo.profile</code>. Used to know which account you signed in as and to show your name and profile photo in the app. Nothing more.</li>
+  </ul>
+  <p>zero does <strong>not</strong> request access to Google Drive, Calendar, Docs, Sheets, Slides, Tasks, or your contacts. If you ever see those on the consent screen, something is wrong — tell us.</p>
+
+  <h2>Where your data goes</h2>
+  <p>Your email data travels along exactly two paths, both of which you already use and control:</p>
+  <ul>
+    <li><strong>To and from Google</strong> — zero reads your mailbox through Google's Gmail API, directly from your Mac, using your sign-in. This is your own data moving between you and Google.</li>
+    <li><strong>To the AI assistant you choose</strong> — to decide whether a thread still needs you (and to draft a reply when you ask), zero sends the relevant message text to the AI provider configured on your machine. By default that's Anthropic's Claude, through the Claude command-line tool you've signed into; you can point zero at another provider or a local model instead. That text is handled under <em>your</em> agreement with that provider. zero adds nothing on top and keeps no copy.</li>
+  </ul>
+  <p>That's it. The data does not pass through any server we operate, because we don't operate one.</p>
+
+  <h2>What zero stores, and where</h2>
+  <ul>
+    <li><strong>Sign-in tokens</strong> live only on your Mac — in your login keychain or in an encrypted file in zero's application-support folder. They never leave your machine except to talk to Google.</li>
+    <li><strong>Your settings, labels, and the day's sorting results</strong> are kept in local files on your Mac so the app can show you what it did.</li>
+    <li>We keep <strong>nothing</strong>. There is no database on our side with your information in it.</li>
+  </ul>
+
+  <h2>Limited Use</h2>
+  <p>zero's use and transfer of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Google API Services User Data Policy</a>, including its Limited Use requirements. zero uses Gmail data only to provide and improve the in-app features you can see — sorting your inbox and drafting replies — and for no other purpose. We do not transfer this data to others except as needed to provide those features (the AI provider you choose), and we do not use it for advertising or sell it to anyone.</p>
+
+  <h2>What we never do</h2>
+  <ul>
+    <li>We don't sell your data, or share it for advertising.</li>
+    <li>We don't read your mail. No human at zero can — we never receive it.</li>
+    <li>We don't use your mail to train AI models. (Whether your chosen AI provider does is governed by their policy — with Claude, on the standard developer terms, your content is not used for training.)</li>
+    <li>We don't track you. No analytics, no telemetry, no usage pings.</li>
+  </ul>
+
+  <h2>Your control</h2>
+  <ul>
+    <li><strong>Revoke access at any time</strong> from your Google account at <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a> — find zero in the list and remove it. zero loses access immediately.</li>
+    <li><strong>Remove an account</strong> inside zero, or quit and delete the app. Deleting zero's application-support folder removes every local trace, including the stored tokens.</li>
+    <li>Because we hold nothing, there's no account to close on our side and nothing for us to delete on your behalf.</li>
+  </ul>
+
+  <h2>Children</h2>
+  <p>zero isn't directed at anyone under 13 (or the equivalent minimum age where you live), and we don't knowingly collect their data.</p>
+
+  <h2>Changes</h2>
+  <p>If this policy changes in a way that matters, we'll update the date above and note it in the app's release notes. zero is open source, so every change is also visible in its public history.</p>
+
+  <hr>
+  <footer>
+    <p>Questions about your privacy? Email <a href="mailto:tayo@drewl.com">tayo@drewl.com</a>.</p>
+    <p style="margin-top:0.6rem;"><a href="/">← Back to zero</a> &nbsp;·&nbsp; <a href="/terms.html">Terms</a> &nbsp;·&nbsp; <a href="https://github.com/drewling/zero" target="_blank" rel="noopener">Source on GitHub</a></p>
+  </footer>
+</div>
+</body>
+</html>
