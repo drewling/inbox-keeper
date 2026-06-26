@@ -79,11 +79,19 @@ ensure_brew_pkg() {        # ensure_brew_pkg <command> <formula> <label>
 ensure_npm_pkg() {         # ensure_npm_pkg <command> <package> <label>
   local cmd="$1" pkg="$2" label="$3"
   if have "$cmd"; then ok "$label already installed"; return; fi
-  if have npm; then
-    step "Installing $label"
-    npm install -g "$pkg" && ok "$label installed" || warn "couldn't install $label (npm install -g $pkg)"
-  else
+  if ! have npm; then
     warn "$label missing and npm unavailable — install Node, then: npm install -g $pkg"
+    return
+  fi
+  step "Installing $label"
+  if npm install -g "$pkg" 2>/dev/null; then ok "$label installed"; return; fi
+  # Stock Node installs make npm's global prefix (e.g. /usr/local) root-owned, so
+  # -g fails with EACCES. Retry into ~/.local, which is already on the app's PATH
+  # (augmentedPath in main.swift), so no sudo and the app still finds the binary.
+  if npm install -g --prefix "$HOME/.local" "$pkg"; then
+    ok "$label installed (to ~/.local/bin)"
+  else
+    warn "couldn't install $label (npm install -g $pkg)"
   fi
 }
 

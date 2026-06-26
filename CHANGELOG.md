@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.6.17] - 2026-06-26
+## [1.6.18] - 2026-06-26
+
+### Fixed
+
+- **Copy and paste work in the panel.** ⌘C, ⌘V, ⌘X, ⌘A, and ⌘Z had no effect anywhere in the panel, including the Google setup command during onboarding, so the only way to copy or paste was the right-click menu. The shortcuts now reach the focused field directly.
+- **Setup no longer needs admin rights for the Google CLI.** On Macs where Node was installed system-wide, the installer hit a permission error trying to add the Google Workspace CLI and skipped it, leaving setup broken. It now installs into your home folder when the system location is locked down, no password required.
 
 ### Fixed
 

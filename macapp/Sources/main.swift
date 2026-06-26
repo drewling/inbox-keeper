@@ -152,6 +152,27 @@ func augmentedPath() -> String {
 
 final class KeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
+
+    // This is an LSUIElement app with no Edit menu, so the standard editing key
+    // equivalents (⌘C/⌘V/⌘X/⌘A/⌘Z) have no menu item to fire and never reach the
+    // focused text field — copy/paste only worked via the right-click menu. Route
+    // them to the first responder (nil target) ourselves.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.contains(.command),
+           let key = event.charactersIgnoringModifiers?.lowercased() {
+            let sel: Selector?
+            switch key {
+            case "c": sel = #selector(NSText.copy(_:))
+            case "v": sel = #selector(NSText.paste(_:))
+            case "x": sel = #selector(NSText.cut(_:))
+            case "a": sel = #selector(NSResponder.selectAll(_:))
+            case "z": sel = Selector(event.modifierFlags.contains(.shift) ? "redo:" : "undo:")
+            default:  sel = nil
+            }
+            if let sel = sel, NSApp.sendAction(sel, to: nil, from: self) { return true }
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 }
 
 /// Dark frosted surface for the panel — classic vibrancy (what Raycast-style panels
