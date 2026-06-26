@@ -176,6 +176,7 @@ final class GlassSurface: NSView {
     // Masked to the body+beak silhouette, it sits behind the (transparent) SwiftUI content.
     private let tint = CAGradientLayer()
     private let tintMask = CALayer()
+    private let tintHost = NSView()   // hosts `tint` as a subview so it composites ABOVE the vibrancy
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -188,18 +189,24 @@ final class GlassSurface: NSView {
         effect.autoresizingMask = [.width, .height]
         addSubview(effect)
 
-        // Uniform graphite across the whole surface (body + beak). The vibrancy below
-        // samples whatever is behind the panel, so the LOWER this alpha, the more the
-        // backdrop bleeds through — which is exactly why the panel looked super
-        // transparent over a white window and solid over a dark one. Raising it shrinks
-        // that backdrop bleed so the surface reads consistently regardless of what is
-        // behind it, while staying short of fully opaque so it still reads as glass.
-        // ~0.42 was too see-through over white, ~0.94 too flat, ~0.66 still bled ~34%;
-        // ~0.80 cuts the bleed to ~20% for a consistent look. sRGB to match SwiftUI Color().
-        let graphite = CGColor(srgbRed: 0.135, green: 0.132, blue: 0.127, alpha: 0.80)
+        // Uniform graphite across the whole surface (body + beak). This tint MUST sit
+        // ABOVE the vibrancy: AppKit composites subview layers above any manually added
+        // sublayers, so `layer.addSublayer(tint)` buried the tint UNDER the vibrancy and
+        // the blurred backdrop spilled over it — the panel went near-transparent over a
+        // white window and solid over a dark one, and raising the alpha barely helped
+        // because the vibrancy was on top. Hosting `tint` in a subview added after
+        // `effect` puts it above the vibrancy (and below the content), so the alpha now
+        // actually governs how much backdrop shows. ~0.88 reads as a consistent dark
+        // glass over any backdrop while a sliver of vibrancy still shimmers through.
+        // sRGB to match SwiftUI Color().
+        let graphite = CGColor(srgbRed: 0.135, green: 0.132, blue: 0.127, alpha: 0.88)
         tint.colors = [graphite, graphite]
         tint.mask = tintMask
-        layer?.addSublayer(tint)
+        tintHost.wantsLayer = true
+        tintHost.frame = bounds
+        tintHost.autoresizingMask = [.width, .height]
+        tintHost.layer?.addSublayer(tint)
+        addSubview(tintHost)            // after `effect` → renders above the vibrancy
 
         applyMask()
     }
@@ -352,23 +359,30 @@ final class AppController: NSObject, NSApplicationDelegate, UNUserNotificationCe
         if !hasConnectedAccount() { showPanelWhenIconReady() }
     }
 
-    /// True once macOS has actually placed the status item in the bar — its button
-    /// window exists, sits on a real screen, and has a non-zero frame. Until then
-    /// the button frame is bogus and anchoring the panel to it lands it floating.
-    func iconReady() -> Bool {
+    /// The status item's on-screen frame, but ONLY once macOS has actually placed it
+    /// in the menu bar. Before layout the button window sits at the origin (~0,0) —
+    /// bottom-left — which still has a real width and "intersects a screen", so a
+    /// width/intersection test passes on garbage. A placed menu-bar item lives in the
+    /// top band of its screen, so require its top to be up at the menu bar. Returns
+    /// nil while unplaced, so callers never anchor the panel to a bogus origin frame
+    /// (which clamps to the bottom-left corner — the "random place on first launch" bug).
+    func placedIconFrame() -> NSRect? {
         guard let button = statusItem?.button, let bWin = button.window,
-              bWin.screen != nil else { return false }
+              let screen = bWin.screen else { return nil }
         let f = bWin.convertToScreen(button.convert(button.bounds, to: nil))
-        return f.width > 1 && NSScreen.screens.contains { $0.frame.intersects(f) }
+        guard f.width > 1,
+              f.maxY >= screen.frame.maxY - NSStatusBar.system.thickness - 4 else { return nil }
+        return f
     }
 
     /// First-run auto-open: applicationDidFinishLaunching fires before the menu-bar
     /// icon is laid out, so opening the panel synchronously anchors it to a stale
-    /// frame (the "floating, not under the icon" bug). Wait a few runloop turns for
-    /// a real icon frame, then open under it. After ~0.5s open regardless, so the
-    /// panel never fails to appear even if the icon is on another display or hidden.
+    /// frame and it lands in a random spot. Wait runloop turns for a real (placed)
+    /// icon frame, then open under it. After ~1.5s open regardless — positionPanel
+    /// then falls back to the top-right, so the panel always appears somewhere sane.
     func showPanelWhenIconReady(attempt: Int = 0) {
-        if iconReady() || attempt >= 10 {
+        if placedIconFrame() != nil || attempt >= 30 {
+            launchLog("showPanelWhenIconReady: opening at attempt=\(attempt) iconFrame=\(placedIconFrame().map { "(midX=\(Int($0.midX)),maxY=\(Int($0.maxY)))" } ?? "nil")")
             showPanel(on: screenUnderMouse())
         } else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
@@ -615,17 +629,19 @@ final class AppController: NSObject, NSApplicationDelegate, UNUserNotificationCe
         let winH = PANEL_H + ARROW_H
         let visible = target.visibleFrame
         var originX: CGFloat, originY: CGFloat
-        if let button = statusItem.button, let bWin = button.window,
-           bWin.screen?.frame == target.frame {
-            let f = bWin.convertToScreen(button.convert(button.bounds, to: nil))
+        if let f = placedIconFrame(),
+           statusItem?.button?.window?.screen?.frame == target.frame {
+            // Anchor only to a REAL placed icon frame (placedIconFrame() rejects the
+            // un-laid-out origin frame), so we never compute a negative origin that
+            // clamps to the bottom-left corner.
             originX = f.midX - (PANEL_W - 40)
             originX = max(visible.minX + 8, min(originX, visible.maxX - PANEL_W - 8))
             originY = f.minY - GAP - winH
             setArrowX(f.midX - originX)               // item centre in window coords
         } else {
-            // Icon isn't on this screen (or isn't shown) — drop the panel at the
-            // top-RIGHT, where a menu-bar item lives, so it reads as coming from the bar
-            // rather than floating dead-centre.
+            // Icon isn't placed yet, isn't on this screen, or isn't shown — drop the
+            // panel at the top-RIGHT, where a menu-bar item lives, so it reads as coming
+            // from the bar rather than floating dead-centre.
             originX = visible.maxX - PANEL_W - 12
             originY = visible.maxY - winH - 12
             setArrowX(PANEL_W - 40)                    // arrow near the right edge

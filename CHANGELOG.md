@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.17] - 2026-06-26
+
+### Fixed
+
+- **The panel reads the same over any window behind it.** The graphite that darkens the panel was layered *beneath* the frosted-glass effect, so a bright window behind it showed straight through and washed the panel and its text out to near-invisible, while over a dark window it looked solid. The tint now sits above the glass, so the panel is the same readable dark surface whatever is behind it, light or dark, with just a hint of glass shimmer.
+- **First launch opens under the menu-bar icon, every time.** The very first open could still land in the bottom-left corner: the check that decided the icon was ready accepted its not-yet-placed position at the screen origin. zero now waits until the icon is genuinely in the menu bar before opening beneath it, and never drops the panel into a corner.
+
 ## [1.6.16] - 2026-06-26
 
 ### Fixed
