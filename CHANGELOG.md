@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.21] - 2026-06-26
+
+### Added
+
+- **zero ships with its own Google sign-in.** New installs connect Gmail through zero's own Google client — no more creating a Google Cloud project and pasting a JSON file. The onboarding's credentials step is skipped automatically when the built-in client is present.
+
+### Changed
+
+- **Sign-in asks for far less.** zero now requests only the Gmail permission it actually uses (`gmail.modify`) plus your basic identity — no Drive, Calendar, Docs, Sheets, Slides, or Tasks. The consent screen is shorter and the request matches exactly what the app does.
+
 ## [1.6.20] - 2026-06-26
 
 ### Fixed

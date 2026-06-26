@@ -61,6 +61,23 @@ cp "$REPO/accounts.json.example"  "$PAYLOAD/accounts.json.example"
 mkdir -p "$PAYLOAD/knowledge"
 cp "$REPO/knowledge/profile.example.md" "$PAYLOAD/knowledge/profile.example.md"
 
+# --- bundled Google OAuth client (Desktop) — ships built-in sign-in ---------
+# Sourced from a file kept OUTSIDE the repo (never committed) so the secret
+# doesn't land in public git. A Desktop OAuth client secret is not confidential
+# (installed apps can't keep secrets; PKCE protects the flow), so bundling it in
+# the distributed app is the standard, supported pattern. The leak guard below
+# deliberately allows client_secret.json. If the source file is absent (e.g. a
+# contributor build), we skip it and the app falls back to its paste-your-own-
+# client onboarding — so the build still succeeds, just without one-click login.
+CLIENT_SRC="${ZERO_CLIENT_SECRET:-$HOME/.config/zero-build/client_secret.json}"
+if [ -f "$CLIENT_SRC" ]; then
+  cp "$CLIENT_SRC" "$PAYLOAD/client_secret.json"
+  echo "  Bundled Google OAuth client from $CLIENT_SRC"
+else
+  echo "  NOTE: no bundled client at $CLIENT_SRC — shipping without one-click login"
+  echo "        (set ZERO_CLIENT_SECRET to bundle one; users will paste their own)"
+fi
+
 # ---------------------------------------------------------------------------
 # Leak guard — abort if any personal/secret file crept into the payload.
 # ---------------------------------------------------------------------------

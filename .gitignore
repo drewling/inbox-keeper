@@ -23,7 +23,9 @@ __pycache__/
 *.bak
 *.bak.*
 
-# Sensitive credential backups
+# Sensitive credential backups + any OAuth client (the bundled one is injected at
+# build time from outside the repo — see macapp/build.sh ZERO_CLIENT_SECRET).
+client_secret.json
 client_secret.json.bak
 
 # Your real accounts (use accounts.json.example as a template)

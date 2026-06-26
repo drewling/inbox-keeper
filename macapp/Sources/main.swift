@@ -129,7 +129,9 @@ private func seedFromBundle() -> String? {
         try? fm.copyItem(at: src, to: dst)
     }
     // Code + templates — safe to refresh (never user data). knowledge: only the template.
-    ["lib", "bin", "config.py", "config.sh",
+    // client_secret.json is the bundled OAuth client (skipped if the build had none);
+    // keeper_server seeds it into ~/.config/gws on startup when the user has no client.
+    ["lib", "bin", "config.py", "config.sh", "client_secret.json",
      "accounts.json.example", "knowledge/profile.example.md"].forEach(overwrite)
     // User-editable — seed once, then leave their edits alone.
     ["keep-policy.md", "categories.json"].forEach(seedIfMissing)

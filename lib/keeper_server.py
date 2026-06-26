@@ -2137,11 +2137,32 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "not found"})
 
 
+def _seed_bundled_client():
+    """First-run only: copy the app's bundled OAuth client into ~/.config/gws so Google
+    sign-in works out of the box (no paste-your-own-client step). Seeds ONLY when the
+    user has no client yet — never clobbers one they set up themselves. The bundled file
+    at ROOT/client_secret.json is placed by the app's seedFromBundle; in source/dev runs
+    it's absent and this is a no-op."""
+    import shutil
+    src = os.path.join(ROOT, "client_secret.json")
+    dst = os.path.join(os.path.expanduser("~"), ".config", "gws", "client_secret.json")
+    if not os.path.isfile(src) or os.path.isfile(dst):
+        return
+    try:
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copyfile(src, dst)
+        os.chmod(dst, 0o600)
+        print("seeded bundled Google OAuth client into ~/.config/gws")
+    except Exception as exc:
+        print(f"warning: could not seed bundled OAuth client: {exc}", file=sys.stderr)
+
+
 def main():
     global _building
     # gws needs the file keyring backend to work headlessly; ensure it's set even
     # when the server is started directly (the CLI / app set it, but be safe).
     os.environ.setdefault("GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND", "file")
+    _seed_bundled_client()
     host = os.environ.get("KEEPER_HOST", "127.0.0.1")
     port = int(os.environ.get("KEEPER_PORT", "8765"))
 
