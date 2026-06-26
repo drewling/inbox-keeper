@@ -25,6 +25,15 @@ ROOT = os.path.dirname(HERE)
 STATE_PATH = os.path.join(ROOT, "app", "state.json")
 POLICY_PATH = os.path.join(ROOT, "keep-policy.md")
 ACCOUNTS_PATH = os.path.join(ROOT, "accounts.json")
+# The exact OAuth scopes zero requests at sign-in. Keep this in lockstep with the
+# scopes registered on the Cloud Console OAuth client — Google verifies against the
+# registered set, and requesting anything zero don't use gets verification rejected.
+# gmail.modify covers everything Gmail (read, archive, label, draft, send); the rest
+# are identity (and userinfo.profile powers the account avatar, non-sensitive).
+OAUTH_SCOPES = ("openid,"
+                "https://www.googleapis.com/auth/userinfo.email,"
+                "https://www.googleapis.com/auth/userinfo.profile,"
+                "https://www.googleapis.com/auth/gmail.modify")
 CATEGORIES_PATH = os.path.join(ROOT, "categories.json")
 SETTINGS_PATH = os.path.join(ROOT, "app", "settings.json")
 # A run drops a one-shot notification here; the app pops it and posts a native
@@ -1250,7 +1259,11 @@ def _add_account(payload):
         # Launch in its own session (start_new_session=True) so we can killpg() the
         # entire process group — the gws grandchild included — on timeout or cancel.
         # stderr is merged into stdout so the consent URL + any error share one stream.
-        p = subprocess.Popen(["gws", "auth", "login"], env=env,
+        # --scopes pins the request to exactly what zero uses: gmail.modify (read +
+        # archive + label + drafts/send) plus identity. gws's default bundle also asks
+        # for drive/calendar/docs/sheets/slides/tasks, which zero never touches — that
+        # over-ask is what fails Google's OAuth verification, so we never request it.
+        p = subprocess.Popen(["gws", "auth", "login", "--scopes", OAUTH_SCOPES], env=env,
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                              text=True, bufsize=1, start_new_session=True)
         pgid = os.getpgid(p.pid)
