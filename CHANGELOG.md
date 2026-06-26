@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.15] - 2026-06-26
+
+### Fixed
+
+- **Adding a Google account works again.** After signing in through Google you could hit "Couldn't add account: signed in but couldn't read the account email", with no way forward, on both the installer and the disk image. zero read your address from the sign-in tool's response by scanning for a single line of data, but the tool now prints that response across several lines, so the address always came back empty. zero now reads the whole response, and if an account genuinely cannot be read it shows the real reason (for example the Gmail API not being enabled) instead of a dead end.
+
 ## [1.6.14] - 2026-06-26
 
 ### Fixed

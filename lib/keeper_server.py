@@ -1233,17 +1233,19 @@ def _add_account(payload):
                 "Sign-in didn't complete. Make sure you finished signing in in your "
                 "browser, then try Add account again." + tail)
 
-        prof = subprocess.run(["gws", "gmail", "users", "getProfile", "--params",
-                               json.dumps({"userId": "me"})], env=env,
-                              capture_output=True, text=True, timeout=60)
-        email = ""
-        for line in prof.stdout.splitlines():
-            line = line.strip()
-            if line.startswith("{") and "keyring" not in line:
-                try:
-                    email = json.loads(line).get("emailAddress", "")
-                except Exception:
-                    pass
+        # Read the just-signed-in account's email. gws pretty-prints JSON across
+        # several lines AND exits 0 even on API errors (401/403), so the old
+        # single-line scan silently produced an empty email and a dead-end message.
+        # Reuse draftutil._gws's robust parse: it joins all lines before json.loads
+        # and raises the gws error body, so real failures (e.g. Gmail API not
+        # enabled) surface instead of "couldn't read the account email".
+        import draftutil as du  # noqa: E402
+        try:
+            email = du._profile_email(pending)
+        except Exception as exc:
+            raise RuntimeError(
+                "signed in but couldn't read the account email: "
+                + str(exc).strip()[:200])
         if not email:
             raise RuntimeError("signed in but couldn't read the account email")
         accts = _load_accounts()
